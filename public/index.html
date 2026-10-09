@@ -1,0 +1,3238 @@
+  <!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<meta name="color-scheme" content="dark light" />
+<meta name="theme-color" content="#080C16" />
+<meta name="description" content="Aktivasi Premium Alight Motion — verifikasi email tanpa kata sandi." />
+<title>Aktivasi Premium — Alight Motion</title>
+
+<!-- ============================================================
+     BOOT SCRIPT — WAJIB di <head> agar tema tidak flash
+     ============================================================ -->
+     
+<!-- ⬇️ ACCESS GUARD v6 — Supabase Realtime (instant auto-logout) -->
+<script type="module">
+  import { supabase } from './supabase.js';
+  
+  (function() {
+    'use strict';
+    
+    function clearSession(reason) {
+      try {
+        localStorage.removeItem('nova.access.okAt');
+        localStorage.removeItem('nova.access.sessionVersion');
+        localStorage.removeItem('nova.user.phone');
+        localStorage.removeItem('nova.user.name');
+        localStorage.removeItem('nova.user.plan');
+        localStorage.removeItem('nova.user.expires');
+        if (reason) sessionStorage.setItem('nova.logoutReason', reason);
+      } catch (e) {}
+      window.location.replace('gate.html');
+    }
+    
+    // Cek sesi lokal dulu (instant)
+    var okAt = 0;
+    var savedPhone = '';
+    var savedExpires = '';
+    var savedVer = 0;
+    try {
+      okAt = parseInt(localStorage.getItem('nova.access.okAt') || '0', 10);
+      savedPhone = localStorage.getItem('nova.user.phone') || '';
+      savedExpires = localStorage.getItem('nova.user.expires') || '';
+      savedVer = parseInt(localStorage.getItem('nova.access.sessionVersion') || '0', 10);
+    } catch (e) {}
+    
+    var TTL = 30 * 24 * 60 * 60 * 1000;
+    if (!okAt || (Date.now() - okAt) > TTL || !savedPhone) {
+      clearSession('Sesi Anda telah berakhir.');
+      throw new Error('redirecting');
+    }
+    
+    // Cek expiry lokal (instant)
+    if (savedExpires) {
+      var expLocal = new Date(savedExpires).getTime();
+      if (!isNaN(expLocal) && expLocal < Date.now()) {
+        clearSession('Masa aktif akun Anda sudah habis. Hubungi admin.');
+        throw new Error('redirecting');
+      }
+    }
+    
+    // ===== Cek awal dari Supabase (untuk validasi saat load) =====
+    (async function initialCheck() {
+      try {
+        var userRes = await supabase
+          .from('users')
+          .select('phone, name, plan, expires, banned')
+          .eq('phone', savedPhone)
+          .maybeSingle();
+        
+        if (userRes.error) return;
+        
+        var u = userRes.data;
+        if (!u) {
+          clearSession('Nomor Anda sudah tidak terdaftar. Hubungi admin.');
+          return;
+        }
+        if (u.banned === true) {
+          clearSession('Akun Anda diblokir oleh admin.');
+          return;
+        }
+        if (u.expires) {
+          var exp = new Date(u.expires).getTime();
+          if (!isNaN(exp) && exp < Date.now()) {
+            clearSession('Masa aktif akun Anda sudah habis. Hubungi admin.');
+            return;
+          }
+        }
+        
+        // Update localStorage dengan data terbaru
+        try {
+          localStorage.setItem('nova.user.name', u.name || '');
+          localStorage.setItem('nova.user.plan', u.plan || 'basic');
+          localStorage.setItem('nova.user.expires', u.expires || '');
+        } catch (e) {}
+        
+        // Cek config session version
+        var cfgRes = await supabase
+          .from('app_config')
+          .select('value')
+          .eq('key', 'sessionVersion')
+          .maybeSingle();
+        
+        if (cfgRes.data && savedVer > 0 && String(cfgRes.data.value) !== String(savedVer)) {
+          clearSession('Sesi Anda telah berakhir. Silakan masuk kembali.');
+        }
+      } catch (e) {}
+    })();
+    
+    // ===== Realtime: user di-update (ban/unban/expired) =====
+    try {
+      supabase
+        .channel('user-watch-' + savedPhone)
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'users',
+            filter: 'phone=eq.' + savedPhone,
+          },
+          function(payload) {
+            var u = payload.new;
+            if (!u) return;
+            
+            if (u.banned === true) {
+              clearSession('Akun Anda diblokir oleh admin.');
+              return;
+            }
+            if (u.expires) {
+              var exp = new Date(u.expires).getTime();
+              if (!isNaN(exp) && exp < Date.now()) {
+                clearSession('Masa aktif akun Anda sudah habis. Hubungi admin.');
+                return;
+              }
+            }
+            
+            // Update data lokal
+            try {
+              localStorage.setItem('nova.user.name', u.name || '');
+              localStorage.setItem('nova.user.plan', u.plan || 'basic');
+              localStorage.setItem('nova.user.expires', u.expires || '');
+            } catch (e) {}
+          }
+        )
+        .subscribe();
+      
+      // Realtime: user dihapus
+      supabase
+        .channel('user-delete-watch-' + savedPhone)
+        .on(
+          'postgres_changes',
+          {
+            event: 'DELETE',
+            schema: 'public',
+            table: 'users',
+          },
+          function(payload) {
+            var old = payload.old;
+            if (old && old.phone === savedPhone) {
+              clearSession('Nomor Anda sudah tidak terdaftar. Hubungi admin.');
+            }
+          }
+        )
+        .subscribe();
+      
+      // Realtime: session version diubah (force logout)
+      supabase
+        .channel('config-watch')
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'app_config',
+          },
+          function(payload) {
+            var row = payload.new;
+            if (!row) return;
+            if (row.key === 'sessionVersion') {
+              var localVer = parseInt(localStorage.getItem('nova.access.sessionVersion') || '0', 10);
+              if (localVer > 0 && String(row.value) !== String(localVer)) {
+                clearSession('Sesi Anda telah berakhir. Silakan masuk kembali.');
+              }
+            }
+          }
+        )
+        .subscribe();
+    } catch (e) {
+      // Kalau Realtime gagal, biarkan (fallback: cek saat reload)
+    }
+  })();
+</script>
+<script>
+  (function () {
+    var root = document.documentElement;
+    try {
+      var t = localStorage.getItem('nova.theme') || 'dark';
+      var a = localStorage.getItem('nova.accent') || 'purple-teal';
+      var d = localStorage.getItem('nova.density') || 'comfortable';
+      var m = localStorage.getItem('nova.motion') || 'full';
+      var lang = localStorage.getItem('nova.lang') || 'id';
+      var dark = true;
+      try { dark = window.matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) {}
+      var resolved = t === 'system' ? (dark ? 'dark' : 'light') : t;
+      root.setAttribute('data-theme', resolved);
+      root.setAttribute('data-theme-pref', t);
+      root.setAttribute('data-accent', a);
+      root.setAttribute('data-density', d);
+      root.setAttribute('lang', lang);
+      if (m === 'reduced') root.classList.add('reduce-motion');
+      if (m === 'off') root.classList.add('no-motion');
+    } catch (e) {
+      root.setAttribute('data-theme', 'dark');
+      root.setAttribute('data-accent', 'purple-teal');
+    }
+  })();
+</script>
+
+<!--
+  FONT: idealnya di-bundle lokal di APK.
+  Fallback: system font stack sudah lengkap di CSS.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+<!-- ⬇️ TAMBAHKAN BARIS INI ⬇️ -->
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+<!-- ⬆️ SAMPAI SINI ⬆️ -->
+
+<style>
+/* ============================================================
+   DESIGN TOKENS
+   ============================================================ */
+:root {
+  --bg-0: #080C16;
+  --bg-1: #0B1020;
+
+  --surface:    rgba(255,255,255,0.025);
+  --surface-2:  rgba(255,255,255,0.045);
+  --surface-3:  rgba(255,255,255,0.07);
+  --surface-solid: #0F1424;
+
+  --border:   rgba(255,255,255,0.06);
+  --border-2: rgba(255,255,255,0.10);
+  --border-3: rgba(255,255,255,0.16);
+
+  --text:   #FFFFFF;
+  --text-2: #A0A8BC;
+  --text-3: #6B7280;
+
+  /* SEMANTIC — tidak berubah dengan accent */
+  --success:      #34D399;
+  --success-2:    #10B981;
+  --success-tint: rgba(52,211,153,0.12);
+  --danger:       #F87171;
+  --danger-2:     #EF4444;
+  --danger-tint:  rgba(248,113,113,0.12);
+  --warning:      #FBBF24;
+  --info:         #60A5FA;
+
+  /* ACCENT — di-set oleh [data-accent] selector */
+  --acc-1: #8B5CF6;
+  --acc-1-soft: #A78BFA;
+  --acc-2: #10B981;
+  --acc-2-soft: #34D399;
+  --acc-1-rgb: 139,92,246;
+  --acc-2-rgb: 16,185,129;
+
+  --grad-cta:     linear-gradient(135deg, var(--acc-1), var(--acc-2));
+  --grad-premium: linear-gradient(135deg, var(--acc-1-soft), var(--acc-1));
+  --grad-success: linear-gradient(135deg, #34D399, #10B981);
+
+  --shadow-xs: 0 1px 2px rgba(0,0,0,0.35);
+  --shadow-sm: 0 2px 8px -2px rgba(0,0,0,0.4);
+  --shadow-md: 0 10px 30px -10px rgba(0,0,0,0.55);
+  --shadow-lg: 0 24px 48px -16px rgba(0,0,0,0.7);
+
+  --r-sm: 10px; --r: 14px;
+  --r-md: 16px; --r-lg: 20px; --r-xl: 24px;
+  --r-pill: 999px;
+
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Safe area (Android) */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+
+  --pad-card: 24px;
+  --h-input: 52px;
+  --h-btn: 52px;
+}
+
+/* ============================================================
+   ACCENT PRESETS — single source of truth
+   ============================================================ */
+[data-accent="purple-teal"]   { --acc-1:#8B5CF6; --acc-1-soft:#A78BFA; --acc-2:#10B981; --acc-2-soft:#34D399; --acc-1-rgb:139,92,246; --acc-2-rgb:16,185,129; }
+[data-accent="blue-purple"]   { --acc-1:#60A5FA; --acc-1-soft:#93C5FD; --acc-2:#8B5CF6; --acc-2-soft:#A78BFA; --acc-1-rgb:96,165,250; --acc-2-rgb:139,92,246; }
+[data-accent="pink-purple"]   { --acc-1:#EC4899; --acc-1-soft:#F472B6; --acc-2:#8B5CF6; --acc-2-soft:#A78BFA; --acc-1-rgb:236,72,153; --acc-2-rgb:139,92,246; }
+[data-accent="orange-yellow"] { --acc-1:#FBBF24; --acc-1-soft:#FCD34D; --acc-2:#F97316; --acc-2-soft:#FB923C; --acc-1-rgb:251,191,36; --acc-2-rgb:249,115,22; }
+
+[data-density="compact"] {
+  --pad-card: 18px;
+  --h-input: 46px;
+  --h-btn: 46px;
+}
+
+[data-theme="light"] {
+  --bg-0: #EEF0F7;
+  --bg-1: #F6F7FB;
+  --surface:    rgba(255,255,255,0.9);
+  --surface-2:  rgba(15,20,40,0.035);
+  --surface-3:  rgba(15,20,40,0.07);
+  --surface-solid: #FFFFFF;
+  --border:   rgba(15,20,40,0.07);
+  --border-2: rgba(15,20,40,0.13);
+  --border-3: rgba(15,20,40,0.22);
+  --text:   #0A0E1A;
+  --text-2: #4B5268;
+  --text-3: #8A90A4;
+  --shadow-xs: 0 1px 2px rgba(20,25,60,0.06);
+  --shadow-sm: 0 2px 8px -2px rgba(20,25,60,0.08);
+  --shadow-md: 0 10px 30px -12px rgba(20,25,60,0.12);
+  --shadow-lg: 0 30px 60px -20px rgba(20,25,60,0.16);
+}
+
+/* ============================================================
+   RESET — kompatibel WebView lama
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; }
+* { -webkit-tap-highlight-color: transparent; }
+
+html {
+  -webkit-text-size-adjust: 100%;
+  width: 100%;
+  max-width: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', system-ui, sans-serif;
+  background: var(--bg-0);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+  line-height: 1.5;
+  width: 100%;
+  max-width: 100%;
+  /* fallback untuk WebView < Chrome 90: */
+  overflow-x: hidden;
+  overscroll-behavior-y: none;
+  transition: background-color 260ms var(--ease), color 260ms var(--ease);
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+}
+
+/* support overflow-x: clip pada WebView modern */
+@supports (overflow: clip) {
+  body { overflow-x: clip; }
+}
+
+::selection { background: rgba(var(--acc-1-rgb), 0.55); color: #fff; }
+button { font: inherit; cursor: pointer; border: 0; background: none; color: inherit; padding: 0; }
+input, select { font: inherit; }
+svg { display: block; }
+a { color: inherit; text-decoration: none; }
+[hidden] { display: none !important; }
+
+:focus-visible {
+  outline: 2px solid var(--acc-1-soft);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ============================================================
+   BACKGROUND
+   ============================================================ */
+.atmosphere {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.atmo-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(100px);
+  transition: opacity 400ms var(--ease), background 400ms var(--ease);
+}
+.atmo-blob-1 {
+  width: 520px; height: 520px;
+  top: -220px; right: -180px;
+  background: radial-gradient(circle, rgba(var(--acc-1-rgb), 0.55), transparent 65%);
+  opacity: 0.13;
+  animation: drift-1 28s ease-in-out infinite;
+}
+.atmo-blob-2 {
+  width: 460px; height: 460px;
+  top: 30%; left: -220px;
+  background: radial-gradient(circle, rgba(var(--acc-1-rgb), 0.40), transparent 65%);
+  opacity: 0.10;
+  animation: drift-2 34s ease-in-out infinite;
+}
+.atmo-blob-3 {
+  width: 500px; height: 500px;
+  bottom: -240px; right: 10%;
+  background: radial-gradient(circle, rgba(var(--acc-2-rgb), 0.55), transparent 65%);
+  opacity: 0.12;
+  animation: drift-3 30s ease-in-out infinite;
+}
+@keyframes drift-1 { 0%,100%{transform:translate(0,0) scale(1)} 50%{transform:translate(-30px,40px) scale(1.06)} }
+@keyframes drift-2 { 0%,100%{transform:translate(0,0) scale(1)} 50%{transform:translate(50px,-30px) scale(1.08)} }
+@keyframes drift-3 { 0%,100%{transform:translate(0,0) scale(1)} 50%{transform:translate(-40px,-20px) scale(1.05)} }
+
+[data-ambient="off"] .atmo-blob { opacity: 0.02; animation: none; }
+
+/* Pause semua animasi ambient saat tab tidak aktif — hemat baterai */
+.page-hidden .atmo-blob,
+.page-hidden .orb-ring,
+.page-hidden .orb-core,
+.page-hidden .orb-glow,
+.page-hidden .orb-particles span { animation-play-state: paused !important; }
+
+/* Grain overlay */
+.atmosphere::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/></svg>");
+  opacity: 0.022;
+  mix-blend-mode: overlay;
+  pointer-events: none;
+}
+[data-bg-effects="off"] .atmosphere::after { display: none; }
+[data-theme="light"] .atmosphere::after { opacity: 0.035; }
+
+/* Mobile: kurangi blur radius supaya hemat GPU */
+@media (max-width: 640px) {
+  .atmo-blob { filter: blur(70px); }
+}
+
+/* ============================================================
+   HEADER
+   ============================================================ */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: rgba(8, 12, 22, 0.78);
+  backdrop-filter: saturate(160%) blur(12px);
+  -webkit-backdrop-filter: saturate(160%) blur(12px);
+  border-bottom: 1px solid transparent;
+  padding-top: var(--safe-top);
+  transition: border-color 240ms var(--ease), background-color 240ms var(--ease);
+}
+[data-theme="light"] .app-header { background: rgba(238, 240, 247, 0.85); }
+
+/* WebView lama: fallback solid bila backdrop-filter tidak didukung */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .app-header { background: var(--bg-0); }
+}
+
+.app-header.is-scrolled {
+  background: rgba(8, 12, 22, 0.92);
+  border-bottom-color: var(--border);
+}
+[data-theme="light"] .app-header.is-scrolled { background: rgba(238, 240, 247, 0.96); }
+
+.header-inner {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 16px;
+  height: 58px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+@media (min-width: 640px) { .header-inner { padding: 0 24px; height: 62px; } }
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.02em;
+  flex-shrink: 0;
+}
+.brand-mark {
+  position: relative;
+  width: 30px; height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--grad-premium);
+  color: #fff;
+  box-shadow: 0 4px 14px -4px rgba(var(--acc-1-rgb), 0.6);
+  transition: transform 300ms var(--ease);
+}
+.brand-mark::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 9px;
+  background: linear-gradient(135deg, rgba(255,255,255,0.4), transparent 55%);
+  pointer-events: none;
+}
+.brand:hover .brand-mark { transform: translateY(-1px) rotate(-4deg); }
+.brand-mark svg { width: 15px; height: 15px; position: relative; z-index: 1; color: #fff; }
+
+.view-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--r);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  margin-left: 4px;
+}
+.view-tab {
+  padding: 9px 14px;
+  min-height: 40px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
+  transition: background-color 200ms var(--ease), color 200ms var(--ease);
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+}
+.view-tab:hover { color: var(--text); }
+.view-tab.is-active {
+  background: var(--surface-3);
+  color: var(--text);
+  box-shadow: var(--shadow-xs);
+}
+@media (max-width: 420px) {
+  .view-tab { padding: 8px 11px; font-size: 12.5px; min-height: 36px; }
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.icon-btn {
+  position: relative;
+  width: 44px; height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  color: var(--text-2);
+  transition: background-color 200ms var(--ease),
+              color 200ms var(--ease),
+              border-color 200ms var(--ease),
+              transform 200ms var(--ease);
+}
+.icon-btn:hover { background: var(--surface-2); border-color: var(--border); color: var(--text); }
+.icon-btn:active { transform: scale(0.92); }
+.icon-btn svg { width: 18px; height: 18px; }
+
+.theme-wrap { position: relative; }
+.theme-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 190px;
+  padding: 6px;
+  border-radius: 16px;
+  background: var(--surface-solid);
+  border: 1px solid var(--border-2);
+  box-shadow: var(--shadow-lg);
+  z-index: 60;
+  animation: menu-in 180ms var(--ease-out) both;
+}
+@keyframes menu-in {
+  from { opacity: 0; transform: translateY(-6px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.menu-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 12px;
+  min-height: 44px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text-2);
+  transition: background-color 160ms var(--ease), color 160ms var(--ease);
+  text-align: left;
+}
+.menu-option:hover { background: var(--surface-2); color: var(--text); }
+.menu-option.is-active { color: var(--text); }
+.menu-option svg { width: 15px; height: 15px; }
+.menu-option .check { margin-left: auto; opacity: 0; color: var(--acc-2); transition: opacity 160ms var(--ease); }
+.menu-option.is-active .check { opacity: 1; }
+
+/* ============================================================
+   MAIN LAYOUT
+   ============================================================ */
+.app-main {
+  position: relative;
+  z-index: 10;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 28px 16px calc(64px + var(--safe-bottom));
+}
+@media (min-width: 640px) {
+  .app-main { padding: 44px 24px calc(80px + var(--safe-bottom)); }
+}
+
+.view { animation: view-in 320ms var(--ease-out) both; }
+@keyframes view-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ============================================================
+   HERO
+   ============================================================ */
+.hero { text-align: center; margin-bottom: 24px; }
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+}
+.hero-badge svg { width: 13px; height: 13px; color: var(--acc-1-soft); }
+
+.hero-title {
+  font-size: clamp(28px, 6vw, 46px);
+  line-height: 1.08;
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  margin: 0 0 10px;
+  word-break: break-word;
+}
+.hero-title .grad {
+  background: var(--grad-premium);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+.hero-subtitle {
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--text-2);
+  margin: 0 auto;
+  max-width: 440px;
+}
+@media (min-width: 640px) { .hero-subtitle { font-size: 16px; } }
+
+/* ============================================================
+   STEPPER
+   ============================================================ */
+.stepper-wrap { margin: 24px auto 20px; max-width: 600px; }
+.stepper {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.step {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+  min-width: 0;
+}
+.step:not(:first-child)::before {
+  content: '';
+  position: absolute;
+  top: 15px;
+  right: 50%;
+  width: 100%;
+  height: 2px;
+  background: var(--border-2);
+  border-radius: 2px;
+  z-index: 0;
+}
+.step:not(:first-child)::after {
+  content: '';
+  position: absolute;
+  top: 15px;
+  right: 50%;
+  width: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--acc-1), var(--acc-2));
+  border-radius: 2px;
+  z-index: 0;
+  transition: width 500ms var(--ease-out);
+}
+.step[data-line="filled"]::after { width: 100%; }
+
+.step-marker {
+  position: relative;
+  z-index: 1;
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11.5px;
+  font-weight: 700;
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  color: var(--text-3);
+  transition: background-color 400ms var(--ease),
+              border-color 400ms var(--ease),
+              color 400ms var(--ease),
+              box-shadow 400ms var(--ease),
+              transform 400ms var(--ease);
+}
+.step-marker svg { width: 14px; height: 14px; }
+
+.step[data-status="completed"] .step-marker {
+  background: var(--grad-success);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 6px 20px -6px rgba(52,211,153,0.55);
+}
+.step[data-status="active"] .step-marker {
+  background: var(--grad-premium);
+  border-color: transparent;
+  color: #fff;
+  transform: scale(1.05);
+  box-shadow: 0 6px 20px -6px rgba(var(--acc-1-rgb), 0.6),
+              0 0 0 5px rgba(var(--acc-1-rgb), 0.12);
+}
+.step[data-status="processing"] .step-marker {
+  background: var(--grad-premium);
+  border-color: transparent;
+  color: #fff;
+  animation: marker-breathe 2.2s var(--ease) infinite;
+}
+@keyframes marker-breathe {
+  0%,100% { box-shadow: 0 6px 20px -6px rgba(var(--acc-1-rgb), 0.6), 0 0 0 4px rgba(var(--acc-1-rgb), 0.10); }
+  50%     { box-shadow: 0 6px 20px -6px rgba(var(--acc-1-rgb), 0.6), 0 0 0 9px rgba(var(--acc-1-rgb), 0.03); }
+}
+.step[data-status="failed"] .step-marker {
+  background: var(--danger-tint);
+  border-color: rgba(248,113,113,0.4);
+  color: var(--danger);
+}
+
+.step-label {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--text-3);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0 2px;
+  transition: color 400ms var(--ease);
+  word-break: break-word;
+}
+.step-num { display: block; font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; opacity: 0.65; margin-bottom: 1px; }
+.step[data-status="completed"] .step-label,
+.step[data-status="active"] .step-label,
+.step[data-status="processing"] .step-label { color: var(--text); }
+.step[data-status="completed"] .step-num { color: var(--success); opacity: 1; }
+.step[data-status="active"] .step-num,
+.step[data-status="processing"] .step-num { color: var(--acc-1-soft); opacity: 1; }
+
+@media (min-width: 640px) {
+  .step-marker { width: 36px; height: 36px; font-size: 13px; }
+  .step-marker svg { width: 16px; height: 16px; }
+  .step:not(:first-child)::before,
+  .step:not(:first-child)::after { top: 17px; }
+  .step-label { font-size: 11.5px; }
+}
+
+/* ============================================================
+   STAGE
+   ============================================================ */
+.stage {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+  max-width: 600px;
+  margin: 0 auto;
+  align-items: center;
+}
+@media (min-width: 900px) {
+  .stage {
+    grid-template-columns: minmax(0, 1fr) 300px;
+    gap: 40px;
+    max-width: 920px;
+  }
+}
+.orb-col { order: -1; display: grid; place-items: center; }
+@media (min-width: 900px) { .orb-col { order: 0; } }
+
+/* ============================================================
+   CARD
+   ============================================================ */
+.card {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  padding: var(--pad-card);
+  box-shadow: var(--shadow-md);
+  transition: border-color 300ms var(--ease), box-shadow 300ms var(--ease);
+  min-width: 0;
+}
+@media (min-width: 640px) { .card { padding: 32px; box-shadow: var(--shadow-lg); } }
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 15%; right: 15%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(var(--acc-1-rgb), 0.55), transparent);
+  pointer-events: none;
+}
+
+.card-head { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 20px; }
+.card-icon {
+  position: relative;
+  width: 42px; height: 42px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--grad-premium);
+  color: #fff;
+  box-shadow: 0 6px 18px -6px rgba(var(--acc-1-rgb), 0.65);
+  transition: background 300ms var(--ease), box-shadow 300ms var(--ease);
+}
+.card-icon::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(255,255,255,0.35), transparent 55%);
+  pointer-events: none;
+}
+.card-icon svg { width: 18px; height: 18px; position: relative; z-index: 1; color: #fff; }
+.card-icon.is-success { background: var(--grad-success); }
+
+.card-title {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  margin: 0 0 3px;
+  line-height: 1.25;
+}
+@media (min-width: 640px) { .card-title { font-size: 18.5px; } }
+.card-desc { font-size: 13.5px; line-height: 1.55; color: var(--text-2); margin: 0; }
+.card-desc strong { color: var(--text); font-weight: 600; word-break: break-word; }
+
+/* ============================================================
+   FORM
+   ============================================================ */
+.field { margin-bottom: 16px; }
+.field-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.input-wrap { position: relative; }
+.input-icon {
+  position: absolute;
+  left: 15px; top: 50%;
+  transform: translateY(-50%);
+  width: 17px; height: 17px;
+  color: var(--text-3);
+  pointer-events: none;
+  transition: color 200ms var(--ease), transform 200ms var(--ease);
+}
+.input-wrap:focus-within .input-icon {
+  color: var(--acc-1-soft);
+  transform: translateY(-50%) scale(1.06);
+}
+.input {
+  width: 100%;
+  height: var(--h-input);
+  padding: 0 14px 0 44px;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  color: var(--text);
+  font-size: 15px; /* 16px+ mencegah zoom otomatis di WebView */
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+  transition: border-color 200ms var(--ease),
+              box-shadow 200ms var(--ease),
+              background-color 200ms var(--ease);
+}
+.input::placeholder { color: var(--text-3); }
+.input:hover:not(:disabled) { border-color: var(--border-3); }
+.input:focus {
+  border-color: rgba(var(--acc-1-rgb), 0.6);
+  background: var(--surface-3);
+  box-shadow: 0 0 0 4px rgba(var(--acc-1-rgb), 0.12);
+}
+.input:disabled { background: var(--surface); color: var(--text-3); cursor: not-allowed; opacity: 0.7; }
+
+.helper {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-3);
+  margin-top: 8px;
+}
+.helper svg { width: 13px; height: 13px; margin-top: 2px; flex-shrink: 0; }
+.helper.is-error { color: var(--danger); }
+
+/* ============================================================
+   BUTTONS
+   ============================================================ */
+.btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  height: var(--h-btn);
+  padding: 0 20px;
+  border-radius: var(--r-md);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  isolation: isolate;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 180ms var(--ease),
+              box-shadow 300ms var(--ease),
+              background-color 200ms var(--ease),
+              color 200ms var(--ease),
+              opacity 200ms var(--ease),
+              filter 200ms var(--ease);
+}
+.btn svg { width: 16px; height: 16px; flex-shrink: 0; position: relative; z-index: 1; }
+.btn > * { position: relative; z-index: 1; }
+.btn:active:not(:disabled) { transform: scale(0.97); }
+.btn:disabled { cursor: not-allowed; opacity: 0.5; }
+
+.btn-primary {
+  background: var(--grad-cta);
+  color: #fff;
+  box-shadow: 0 8px 22px -10px rgba(var(--acc-1-rgb), 0.65);
+}
+.btn-primary::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.18), transparent 55%);
+  z-index: 0;
+  pointer-events: none;
+}
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px -12px rgba(var(--acc-1-rgb), 0.75);
+  filter: brightness(1.05);
+}
+
+.btn-secondary {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border-2);
+}
+.btn-secondary:hover:not(:disabled) {
+  background: var(--surface-3);
+  border-color: var(--border-3);
+  transform: translateY(-1px);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-2);
+  border: 1px solid transparent;
+}
+.btn-ghost:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+
+.btn-block { width: 100%; }
+
+.ripple {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.35);
+  transform: scale(0);
+  animation: ripple 600ms cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+  z-index: 0;
+}
+@keyframes ripple { to { transform: scale(3); opacity: 0; } }
+
+.spinner {
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ============================================================
+   INFO STRIP
+   ============================================================ */
+.info-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 13px 15px;
+  border-radius: var(--r);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-2);
+  margin-bottom: 16px;
+}
+.info-strip svg { width: 15px; height: 15px; margin-top: 1px; flex-shrink: 0; color: var(--text-3); }
+.info-strip.is-info {
+  background: linear-gradient(135deg, rgba(96,165,250,0.10), rgba(96,165,250,0.05));
+  border-color: rgba(96,165,250,0.25);
+  color: var(--text);
+}
+.info-strip.is-info svg { color: var(--info); }
+.info-strip.is-danger {
+  background: var(--danger-tint);
+  border-color: rgba(248,113,113,0.22);
+  color: var(--danger);
+}
+.info-strip.is-danger svg { color: var(--danger); }
+
+/* ============================================================
+   RESEND
+   ============================================================ */
+.resend-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 16px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  flex-wrap: wrap;
+}
+.resend-btn {
+  padding: 8px 4px;
+  min-height: 40px;
+  font-weight: 600;
+  color: var(--acc-2-soft);
+  font-size: inherit;
+  transition: color 150ms var(--ease);
+}
+.resend-btn:hover:not(:disabled) { color: var(--acc-2); text-decoration: underline; text-underline-offset: 3px; }
+.resend-btn:disabled { color: var(--text-3); cursor: not-allowed; font-weight: 500; }
+
+/* ============================================================
+   SUCCESS SCREEN
+   ============================================================ */
+.success-screen { text-align: center; }
+.success-icon {
+  position: relative;
+  width: 72px; height: 72px;
+  margin: 0 auto 18px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--grad-success);
+  color: #fff;
+  box-shadow: 0 16px 36px -12px rgba(16,185,129,0.6), 0 0 0 8px rgba(52,211,153,0.08);
+  animation: pop-in 600ms var(--ease-out) both;
+}
+.success-icon::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(255,255,255,0.45), transparent 55%);
+  pointer-events: none;
+}
+.success-icon svg { width: 32px; height: 32px; stroke-width: 2.6; position: relative; z-index: 1; color: #fff; }
+@keyframes pop-in {
+  0%   { transform: scale(0.35); opacity: 0; }
+  55%  { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); }
+}
+.success-screen h2 { font-size: 21px; font-weight: 700; letter-spacing: -0.025em; margin: 0 0 8px; }
+.success-screen > p { font-size: 14px; line-height: 1.6; color: var(--text-2); margin: 0 auto; max-width: 320px; }
+
+.summary {
+  margin-top: 22px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  overflow: hidden;
+  text-align: left;
+}
+.summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 15px;
+  font-size: 13px;
+}
+.summary-row + .summary-row { border-top: 1px solid var(--border); }
+.summary-row .k { color: var(--text-2); font-size: 12.5px; flex-shrink: 0; }
+.summary-row .v { font-weight: 600; color: var(--text); min-width: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--r-pill);
+  font-size: 11.5px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.badge svg { width: 12px; height: 12px; }
+.badge-success {
+  background: var(--success-tint);
+  color: var(--success);
+  border-color: rgba(52,211,153,0.25);
+}
+
+/* ============================================================
+   ORB
+   ============================================================ */
+.orb {
+  position: relative;
+  width: min(180px, 55vw);
+  height: min(180px, 55vw);
+  flex-shrink: 0;
+}
+@media (min-width: 640px) { .orb { width: 200px; height: 200px; } }
+@media (min-width: 900px) { .orb { width: 280px; height: 280px; } }
+
+.orb-glow {
+  position: absolute;
+  inset: -20%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%,
+    rgba(var(--acc-1-rgb), 0.32) 0%,
+    rgba(var(--acc-2-rgb), 0.18) 35%,
+    transparent 65%);
+  filter: blur(40px);
+  animation: orb-breathe 8s ease-in-out infinite;
+  transition: background 500ms var(--ease);
+}
+@keyframes orb-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  50%      { transform: scale(1.08); opacity: 1; }
+}
+
+.orb-ring { position: absolute; border-radius: 50%; pointer-events: none; transition: border-color 400ms var(--ease); }
+.orb-ring-1 {
+  inset: 8%;
+  border: 1px solid rgba(var(--acc-1-rgb), 0.32);
+  border-top-color: rgba(var(--acc-1-rgb), 0.75);
+  border-right-color: transparent;
+  animation: orb-spin 22s linear infinite;
+}
+.orb-ring-1::before {
+  content: '';
+  position: absolute;
+  top: -3px; left: 50%;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--acc-1-soft);
+  box-shadow: 0 0 12px rgba(var(--acc-1-rgb), 0.8);
+  transform: translateX(-50%);
+}
+.orb-ring-2 {
+  inset: -4%;
+  border: 1px dashed rgba(var(--acc-2-rgb), 0.28);
+  animation: orb-spin-rev 36s linear infinite;
+}
+.orb-ring-2::before {
+  content: '';
+  position: absolute;
+  bottom: 10%; right: 6%;
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--acc-2-soft);
+  box-shadow: 0 0 10px rgba(var(--acc-2-rgb), 0.8);
+}
+@keyframes orb-spin { to { transform: rotate(360deg); } }
+@keyframes orb-spin-rev { to { transform: rotate(-360deg); } }
+
+.orb-core {
+  position: absolute;
+  inset: 18%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 30% 28%,
+      rgba(var(--acc-1-rgb), 0.85) 0%,
+      rgba(var(--acc-1-rgb), 0.40) 30%,
+      transparent 60%),
+    radial-gradient(circle at 70% 72%,
+      rgba(var(--acc-2-rgb), 0.85) 0%,
+      rgba(var(--acc-2-rgb), 0.40) 30%,
+      transparent 65%);
+  filter: blur(6px);
+  animation: orb-float 7s ease-in-out infinite;
+  transition: background 500ms var(--ease);
+}
+@keyframes orb-float {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50%      { transform: translate(2px, -6px) scale(1.02); }
+}
+
+.orb-disc {
+  position: absolute;
+  inset: 24%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0.03) 40%, transparent 70%);
+  border: 1px solid rgba(255,255,255,0.09);
+  display: grid;
+  place-items: center;
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 10px 30px -10px rgba(0,0,0,0.5);
+}
+.orb-disc svg {
+  width: 40px; height: 40px;
+  transition: transform 400ms var(--ease), color 400ms var(--ease), filter 400ms var(--ease);
+  filter: drop-shadow(0 2px 8px rgba(var(--acc-1-rgb), 0.5));
+  color: #fff;
+}
+@media (max-width: 899px) { .orb-disc svg { width: 30px; height: 30px; } }
+
+.orb[data-state="sending"] .orb-ring-1 { animation-duration: 8s; }
+.orb[data-state="sending"] .orb-ring-2 { animation-duration: 14s; }
+.orb[data-state="verifying"] .orb-disc svg { animation: spin 2s linear infinite; }
+.orb[data-state="verified"] .orb-disc svg {
+  color: var(--success);
+  filter: drop-shadow(0 2px 12px rgba(52,211,153,0.7));
+}
+
+.orb-particles { position: absolute; inset: 0; pointer-events: none; }
+.orb-particles span { position: absolute; border-radius: 50%; }
+.orb-particles span:nth-child(1) {
+  top: 14%; left: 22%;
+  width: 3px; height: 3px;
+  background: var(--acc-1-soft);
+  box-shadow: 0 0 8px rgba(var(--acc-1-rgb), 0.8);
+  animation: float-1 6s ease-in-out infinite;
+}
+.orb-particles span:nth-child(2) {
+  top: 78%; left: 82%;
+  width: 3px; height: 3px;
+  background: var(--acc-2-soft);
+  box-shadow: 0 0 8px rgba(var(--acc-2-rgb), 0.8);
+  animation: float-2 7.5s ease-in-out infinite;
+}
+.orb-particles span:nth-child(3) {
+  top: 30%; left: 88%;
+  width: 2px; height: 2px;
+  background: #fff;
+  opacity: 0.5;
+  animation: float-3 5.5s ease-in-out infinite;
+}
+.orb-particles span:nth-child(4) {
+  top: 88%; left: 16%;
+  width: 2px; height: 2px;
+  background: var(--acc-1-soft);
+  animation: float-4 8s ease-in-out infinite;
+}
+@keyframes float-1 { 0%,100%{transform:translate(0,0);opacity:0.6} 50%{transform:translate(6px,-10px);opacity:1} }
+@keyframes float-2 { 0%,100%{transform:translate(0,0);opacity:0.6} 50%{transform:translate(-8px,8px);opacity:1} }
+@keyframes float-3 { 0%,100%{transform:translate(0,0);opacity:0.5} 50%{transform:translate(-4px,10px);opacity:0.9} }
+@keyframes float-4 { 0%,100%{transform:translate(0,0);opacity:0.5} 50%{transform:translate(8px,-6px);opacity:0.9} }
+
+/* ============================================================
+   TRUST ROW
+   ============================================================ */
+.trust-row {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin: 24px auto 0;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.trust-item { display: inline-flex; align-items: center; gap: 6px; }
+.trust-item svg { width: 13px; height: 13px; }
+.trust-item:nth-child(1) svg { color: var(--acc-1-soft); }
+.trust-item:nth-child(2) svg { color: var(--warning); }
+.trust-item:nth-child(3) svg { color: var(--success); }
+
+/* ============================================================
+   SETTINGS
+   ============================================================ */
+.settings-wrap { max-width: 720px; margin: 0 auto; }
+
+.settings-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  margin-bottom: 20px;
+  border-radius: var(--r);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.settings-tabs::-webkit-scrollbar { display: none; }
+
+.settings-tab {
+  flex: 1 0 auto;
+  min-width: 120px;
+  padding: 11px 16px;
+  min-height: 44px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text-2);
+  transition: background-color 200ms var(--ease), color 200ms var(--ease);
+  white-space: nowrap;
+  text-align: center;
+}
+.settings-tab:hover { color: var(--text); }
+.settings-tab.is-active {
+  background: var(--surface-3);
+  color: var(--text);
+  box-shadow: var(--shadow-xs);
+  font-weight: 600;
+}
+
+.settings-content { min-width: 0; }
+
+.section-head { margin-bottom: 18px; }
+.section-head h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.025em; margin: 0 0 5px; }
+@media (min-width: 640px) { .section-head h2 { font-size: 25px; } }
+.section-head p { font-size: 13.5px; color: var(--text-2); margin: 0; max-width: 520px; line-height: 1.55; }
+
+.settings-group {
+  position: relative;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+.settings-group + .settings-group { margin-top: 14px; }
+
+.group-label {
+  padding: 14px 16px 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.srow {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+}
+.srow + .srow { border-top: 1px solid var(--border); }
+.srow-info { min-width: 0; }
+.srow-label {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.005em;
+  line-height: 1.35;
+  word-break: break-word;
+}
+.srow-hint {
+  font-size: 12.5px;
+  color: var(--text-3);
+  margin-top: 3px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.srow-control { min-width: 0; }
+
+@media (min-width: 601px) {
+  .srow {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px 18px;
+  }
+  .srow-info { flex: 1 1 auto; }
+  .srow-control { flex: 0 0 auto; }
+}
+
+.switch {
+  position: relative;
+  width: 46px; height: 28px;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  border: 1px solid var(--border-2);
+  flex-shrink: 0;
+  transition: background 200ms var(--ease), border-color 200ms var(--ease);
+  cursor: pointer;
+}
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  transition: transform 200ms var(--ease);
+}
+.switch[aria-checked="true"] { background: var(--grad-cta); border-color: transparent; }
+.switch[aria-checked="true"]::after { transform: translateX(18px); }
+
+.segmented {
+  display: inline-flex;
+  padding: 4px;
+  gap: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  flex-wrap: nowrap;
+  max-width: 100%;
+}
+.segmented button {
+  padding: 8px 14px;
+  min-height: 40px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-2);
+  transition: background-color 180ms var(--ease),
+              color 180ms var(--ease),
+              box-shadow 180ms var(--ease);
+  white-space: nowrap;
+}
+.segmented button:hover { color: var(--text); }
+.segmented button[aria-pressed="true"] {
+  background: var(--surface-3);
+  color: var(--text);
+  box-shadow: var(--shadow-xs);
+  font-weight: 600;
+}
+
+/* ============================================================
+   LANGUAGE SELECTOR
+   ============================================================ */
+.lang-wrap { position: relative; display: block; width: 100%; }
+@media (min-width: 601px) { .lang-wrap { display: inline-block; width: auto; } }
+
+.lang-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 48px;
+  padding: 0 14px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  width: 100%;
+  transition: border-color 200ms var(--ease), background-color 200ms var(--ease), box-shadow 200ms var(--ease);
+  text-align: left;
+}
+@media (min-width: 601px) { .lang-btn { width: auto; min-width: 200px; } }
+.lang-btn:hover { border-color: var(--border-3); background: var(--surface-3); }
+.lang-btn[aria-expanded="true"] {
+  border-color: rgba(var(--acc-1-rgb), 0.55);
+  box-shadow: 0 0 0 3px rgba(var(--acc-1-rgb), 0.12);
+}
+.lang-btn .lang-icon { width: 16px; height: 16px; color: var(--text-3); flex-shrink: 0; transition: color 200ms var(--ease); }
+.lang-btn[aria-expanded="true"] .lang-icon { color: var(--acc-1-soft); }
+.lang-btn #lang-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lang-btn .chev { width: 14px; height: 14px; color: var(--text-3); flex-shrink: 0; transition: transform 200ms var(--ease); }
+.lang-btn[aria-expanded="true"] .chev { transform: rotate(180deg); }
+
+.lang-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--surface-solid);
+  border: 1px solid var(--border-2);
+  box-shadow: var(--shadow-lg);
+  z-index: 100;
+  animation: menu-in 180ms var(--ease-out) both;
+}
+@media (min-width: 601px) { .lang-menu { left: auto; right: 0; min-width: 220px; } }
+
+.lang-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 12px;
+  min-height: 48px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-2);
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 160ms var(--ease), color 160ms var(--ease);
+}
+.lang-option:hover { background: var(--surface-2); color: var(--text); }
+.lang-option.is-active { background: var(--surface-2); color: var(--text); font-weight: 600; }
+.lang-option .opt-icon { width: 15px; height: 15px; color: var(--text-3); flex-shrink: 0; }
+.lang-option.is-active .opt-icon { color: var(--acc-2); }
+.lang-option .opt-name { flex: 1; min-width: 0; }
+.lang-option .opt-check { width: 15px; height: 15px; color: var(--acc-2); opacity: 0; transition: opacity 160ms var(--ease); flex-shrink: 0; }
+.lang-option.is-active .opt-check { opacity: 1; }
+
+/* ============================================================
+   ACCENT PICKER
+   ============================================================ */
+.accent-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+@media (min-width: 540px) { .accent-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+.accent-swatch {
+  position: relative;
+  padding: 11px 11px 13px;
+  border-radius: var(--r);
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  cursor: pointer;
+  text-align: left;
+  transition: transform 200ms var(--ease),
+              border-color 200ms var(--ease),
+              background-color 200ms var(--ease),
+              box-shadow 200ms var(--ease);
+  min-width: 0;
+}
+.accent-swatch:hover { transform: translateY(-2px); background: var(--surface-3); }
+.accent-swatch[aria-pressed="true"] {
+  border-color: var(--acc-1-soft);
+  box-shadow: 0 0 0 3px rgba(var(--acc-1-rgb), 0.18);
+}
+.accent-swatch-preview { display: flex; margin-bottom: 9px; align-items: center; }
+.accent-swatch-dot {
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--surface-solid);
+  margin-right: -8px;
+}
+.accent-swatch-dot:last-child { margin-right: 0; }
+.accent-swatch[data-accent-value="purple-teal"]   .accent-swatch-dot:nth-child(1) { background: #8B5CF6; }
+.accent-swatch[data-accent-value="purple-teal"]   .accent-swatch-dot:nth-child(2) { background: #10B981; }
+.accent-swatch[data-accent-value="blue-purple"]   .accent-swatch-dot:nth-child(1) { background: #60A5FA; }
+.accent-swatch[data-accent-value="blue-purple"]   .accent-swatch-dot:nth-child(2) { background: #8B5CF6; }
+.accent-swatch[data-accent-value="pink-purple"]   .accent-swatch-dot:nth-child(1) { background: #EC4899; }
+.accent-swatch[data-accent-value="pink-purple"]   .accent-swatch-dot:nth-child(2) { background: #8B5CF6; }
+.accent-swatch[data-accent-value="orange-yellow"] .accent-swatch-dot:nth-child(1) { background: #FBBF24; }
+.accent-swatch[data-accent-value="orange-yellow"] .accent-swatch-dot:nth-child(2) { background: #F97316; }
+
+.accent-swatch-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.005em;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+/* ============================================================
+   OFFLINE INDICATOR
+   ============================================================ */
+.offline-banner {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  top: calc(70px + var(--safe-top));
+  z-index: 80;
+  padding: 11px 14px;
+  border-radius: var(--r);
+  background: var(--warning);
+  color: #1A1A1A;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: var(--shadow-md);
+  animation: banner-in 260ms var(--ease-out) both;
+}
+.offline-banner svg { width: 16px; height: 16px; flex-shrink: 0; }
+@keyframes banner-in {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ============================================================
+   TOAST
+   ============================================================ */
+.toast-region {
+  position: fixed;
+  bottom: calc(16px + var(--safe-bottom));
+  left: 16px;
+  right: 16px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+@media (min-width: 640px) {
+  .toast-region { left: auto; right: 24px; bottom: calc(24px + var(--safe-bottom)); width: 380px; }
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 13px 14px;
+  background: var(--surface-solid);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+  animation: toast-in 260ms var(--ease-out) both;
+}
+.toast.is-leaving { animation: toast-out 180ms var(--ease) both; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(12px) scale(0.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes toast-out { to { opacity: 0; transform: translateY(6px) scale(0.98); } }
+.toast-icon { width: 18px; height: 18px; flex-shrink: 0; margin-top: 1px; }
+.toast[data-type="success"] .toast-icon { color: var(--success); }
+.toast[data-type="error"]   .toast-icon { color: var(--danger); }
+.toast[data-type="info"]    .toast-icon { color: var(--info); }
+.toast[data-type="warning"] .toast-icon { color: var(--warning); }
+.toast-title { font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.35; color: var(--text); }
+.toast-desc { font-size: 12.5px; color: var(--text-2); line-height: 1.45; margin-top: 3px; }
+.toast-close {
+  margin-left: auto;
+  color: var(--text-3);
+  padding: 6px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  min-width: 32px;
+  min-height: 32px;
+}
+.toast-close:hover { color: var(--text); background: var(--surface-2); }
+.toast-close svg { width: 14px; height: 14px; }
+
+/* ============================================================
+   SKELETON
+   ============================================================ */
+.skeleton {
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 50%, var(--surface-2) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+/* ============================================================
+   UTILITIES
+   ============================================================ */
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+.reduce-motion *, .reduce-motion *::before, .reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+.reduce-motion .atmo-blob,
+.reduce-motion .orb-ring,
+.reduce-motion .orb-core,
+.reduce-motion .orb-glow,
+.reduce-motion .orb-particles span { animation: none !important; }
+
+.no-motion *, .no-motion *::before, .no-motion *::after {
+  animation: none !important;
+  transition: none !important;
+}
+</style>
+</head>
+
+<body>
+
+<div class="atmosphere" aria-hidden="true">
+  <span class="atmo-blob atmo-blob-1"></span>
+  <span class="atmo-blob atmo-blob-2"></span>
+  <span class="atmo-blob atmo-blob-3"></span>
+</div>
+
+<header class="app-header" id="app-header">
+  <div class="header-inner">
+    <a href="#" class="brand" aria-label="Nova">
+      <span class="brand-mark" aria-hidden="true" data-lucide="zap"></span>
+      <span>Nova</span>
+    </a>
+
+    <nav class="view-nav" role="tablist" aria-label="Main views">
+      <button class="view-tab is-active" data-view="activation" role="tab" aria-selected="true" data-i18n="activation">Aktivasi</button>
+      <button class="view-tab" data-view="settings" role="tab" aria-selected="false" data-i18n="settings">Pengaturan</button>
+    </nav>
+
+    <div class="header-actions">
+      <div class="theme-wrap">
+        <button id="theme-btn" class="icon-btn" aria-label="Ubah tema" aria-haspopup="menu" aria-expanded="false">
+          <i data-lucide="moon" id="theme-icon"></i>
+        </button>
+        <div id="theme-menu" class="theme-menu" role="menu" hidden>
+          <button class="menu-option" data-theme-value="dark" role="menuitem">
+            <i data-lucide="moon"></i><span data-i18n="dark">Gelap</span><i data-lucide="check" class="check"></i>
+          </button>
+          <button class="menu-option" data-theme-value="light" role="menuitem">
+            <i data-lucide="sun"></i><span data-i18n="light">Terang</span><i data-lucide="check" class="check"></i>
+          </button>
+          <button class="menu-option" data-theme-value="system" role="menuitem">
+            <i data-lucide="monitor"></i><span data-i18n="system">Sistem</span><i data-lucide="check" class="check"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main id="view-activation" class="app-main view">
+  <section class="hero">
+    <div class="hero-badge">
+      <i data-lucide="shield-check"></i>
+      <span data-i18n="passwordlessActivation">Aktivasi Tanpa Kata Sandi</span>
+    </div>
+    <h1 class="hero-title" id="hero-title"></h1>
+    <p class="hero-subtitle" data-i18n="heroSubtitle">Verifikasi email Anda dan buka akses premium.</p>
+  </section>
+
+  <div class="stepper-wrap">
+    <ol class="stepper" id="stepper" role="list" aria-label="Progres aktivasi"></ol>
+  </div>
+
+  <div class="stage">
+    <div class="card" id="activation-card" aria-live="polite" aria-atomic="false"></div>
+
+    <div class="orb-col">
+      <div class="orb" id="orb" data-state="idle" aria-hidden="true">
+        <div class="orb-glow"></div>
+        <div class="orb-ring orb-ring-1"></div>
+        <div class="orb-ring orb-ring-2"></div>
+        <div class="orb-core"></div>
+        <div class="orb-disc">
+          <i data-lucide="mail" id="orb-icon"></i>
+        </div>
+        <div class="orb-particles">
+          <span></span><span></span><span></span><span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="trust-row">
+    <span class="trust-item"><i data-lucide="lock"></i><span data-i18n="secure">Aman</span></span>
+    <span class="trust-item"><i data-lucide="zap"></i><span data-i18n="instant">Instan</span></span>
+    <span class="trust-item"><i data-lucide="check-circle-2"></i><span data-i18n="passwordless">Tanpa Password</span></span>
+  </div>
+</main>
+
+<main id="view-settings" class="app-main view" hidden>
+  <div class="settings-wrap">
+    <div class="settings-tabs" role="tablist" aria-label="Bagian pengaturan">
+      <button class="settings-tab is-active" data-section="general" role="tab" aria-selected="true" data-i18n="general">Umum</button>
+      <button class="settings-tab" data-section="appearance" role="tab" aria-selected="false" data-i18n="appearance">Tampilan</button>
+    </div>
+    <div class="settings-content" id="settings-content"></div>
+  </div>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+/* ============================================================
+KONFIGURASI — WAJIB diubah saat deploy ke APK
+============================================================
+Untuk WebView APK yang di-load dari file:///android_asset/,
+set window.NOVA_API_BASE ke URL backend absolut SEBELUM
+script ini dimuat, lewat tag script terpisah di HTML:
+
+window.NOVA_API_BASE = 'https://alightfree.my.id';
+
+atau inject via WebView.evaluateJavascript sebelum page load.
+============================================================ */
+var CONFIG = {
+API_BASE: (typeof window !== 'undefined' && window.NOVA_API_BASE) ? String(window.NOVA_API_BASE).replace(/\/$/, '') : '',
+API_TIMEOUT: 20000,
+MAX_TOASTS: 4,
+};
+
+  /* ============================================================
+     STORAGE dengan fallback untuk WebView yang disable localStorage
+     ============================================================ */
+  var MemoryStore = {};
+  var hasLS = (function () {
+    try {
+      var k = '__nova_test__';
+      localStorage.setItem(k, '1');
+      localStorage.removeItem(k);
+      return true;
+    } catch (e) { return false; }
+  })();
+
+  var ls = {
+    get: function (k, d) {
+      try {
+        if (hasLS) { var v = localStorage.getItem(k); return v == null ? d : v; }
+        return MemoryStore[k] != null ? MemoryStore[k] : d;
+      } catch (e) { return d; }
+    },
+    set: function (k, v) {
+      try {
+        if (hasLS) localStorage.setItem(k, String(v));
+        else MemoryStore[k] = String(v);
+      } catch (e) { MemoryStore[k] = String(v); }
+    },
+    del: function (k) {
+      try {
+        if (hasLS) localStorage.removeItem(k);
+        delete MemoryStore[k];
+      } catch (e) { delete MemoryStore[k]; }
+    }
+  };
+
+  /* ============================================================
+     TRANSLATIONS
+     ============================================================ */
+  var I18N = {
+    en: {
+      activation: 'Activation', settings: 'Settings',
+      passwordlessActivation: 'Passwordless Activation',
+      heroSubtitle: 'Verify your email and unlock premium access.',
+      stepEmail: 'Email', stepVerification: 'Verification',
+      stepActivation: 'Activation', stepComplete: 'Complete',
+      enterYourEmail: 'Enter your email',
+      emailDesc: "We'll send a secure magic link to verify ownership.",
+      emailLabel: 'Email address', emailPlaceholder: 'you@example.com',
+      emailHint: "You'll receive a one-time verification link.",
+      sendMagicLink: 'Send Magic Link', sending: 'Sending…',
+      checkYourInbox: 'Check your inbox',
+      sentTo: 'We sent a secure magic link to',
+      linkExpires: 'This link expires in 10 minutes. Open the email and paste the verification link below.',
+      verificationLink: 'Verification link',
+      linkHint: 'Copy the full link from the email — including the token.',
+      verifyAccount: 'Verify Account', verifying: 'Verifying…',
+      open: 'Open', emailVerified: 'Email verified',
+      readyForPremium: 'Your account is ready for premium activation.',
+      activateInfo: 'Premium access is applied instantly. You can revert this at any time.',
+      activatePremium: 'Activate Premium', activating: 'Activating…',
+      tryAgain: 'Try Again', premiumActivated: 'Premium activated',
+      welcomePremium: 'Welcome to Premium. Your account now has full access.',
+      account: 'Account', status: 'Status', premium: 'Premium',
+      activated: 'Activated', activateAnother: 'Activate another account',
+      secure: 'Secure', instant: 'Instant', passwordless: 'Passwordless',
+      general: 'General', appearance: 'Appearance',
+      generalDesc: 'Configure how Nova behaves on your device.',
+      appearanceDesc: 'Customize how Nova looks and feels.',
+      languageSection: 'Language', language: 'Language',
+      languageHint: 'Interface language across the app',
+      interface: 'Interface', layoutDensity: 'Layout density',
+      layoutDensityHint: 'Comfortable spacing or compact view',
+      animations: 'Animations', animationsHint: 'Control motion across the interface',
+      comfortable: 'Comfortable', compact: 'Compact',
+      full: 'Full', reduced: 'Reduced', off: 'Off',
+      confirmations: 'Confirmations',
+      confirmClear: 'Confirm before clearing history',
+      confirmClearHint: 'Ask before wiping local data',
+      notifications: 'Notifications',
+      notifSuccess: 'Success notifications',
+      notifSuccessHint: 'Show a toast when an action succeeds',
+      notifError: 'Error notifications',
+      notifErrorHint: 'Show a toast when something fails',
+      themeSection: 'Theme', theme: 'Theme',
+      dark: 'Dark', light: 'Light', system: 'System',
+      accentSection: 'Accent', effects: 'Effects',
+      ambient: 'Ambient glow', ambientHint: 'Soft background atmosphere',
+      bgEffects: 'Background effects', bgEffectsHint: 'Grain overlay and depth',
+      invalidEmail: 'Please enter a valid email address.',
+      pasteLink: 'Please paste the verification link from your email.',
+      invalidLink: 'The link appears invalid. Paste the full URL from your email.',
+      verifyFailed: 'Verification failed. The link may be expired or already used.',
+      activateFailed: 'Premium activation failed. Please try again.',
+      linkSent: 'Magic link sent', linkSentDesc: 'Check your inbox to continue.',
+      linkResent: 'Magic link resent', linkResentDesc: 'Check your inbox again.',
+      couldNotSend: 'Could not send link',
+      verificationFailed: 'Verification failed',
+      verificationFailedDesc: 'Request a new link and try again.',
+      emailVerifiedToast: 'Email verified',
+      emailVerifiedDesc: 'You can now activate premium.',
+      premiumActivatedToast: 'Premium activated',
+      premiumActivatedDesc: 'Your account now has full access.',
+      activationFailedToast: 'Activation failed',
+      resendIn: 'Resend in', resend: 'Resend link',
+      didNotReceive: "Didn't receive it?",
+      languageChanged: 'Language changed',
+      languageChangedDesc: 'The interface has been updated.',
+      offline: 'You are offline. Check your connection.',
+      online: 'Back online',
+      requestTimeout: 'Request timed out. Please try again.',
+      networkError: 'Unable to connect to the server. Check your connection and try again.',
+    },
+    id: {
+      activation: 'Aktivasi', settings: 'Pengaturan',
+      passwordlessActivation: 'Aktivasi Tanpa Kata Sandi',
+      heroSubtitle: 'Verifikasi email Anda dan buka akses premium.',
+      stepEmail: 'Email', stepVerification: 'Verifikasi',
+      stepActivation: 'Aktivasi', stepComplete: 'Selesai',
+      enterYourEmail: 'Masukkan email Anda',
+      emailDesc: 'Kami akan mengirim tautan ajaib aman untuk verifikasi.',
+      emailLabel: 'Alamat email', emailPlaceholder: 'anda@contoh.com',
+      emailHint: 'Anda akan menerima tautan verifikasi sekali pakai.',
+      sendMagicLink: 'Kirim Tautan Ajaib', sending: 'Mengirim…',
+      checkYourInbox: 'Periksa kotak masuk Anda',
+      sentTo: 'Kami mengirim tautan ajaib ke',
+      linkExpires: 'Tautan ini berlaku 10 menit. Buka email dan tempel tautan di bawah.',
+      verificationLink: 'Tautan verifikasi',
+      linkHint: 'Salin tautan lengkap dari email — termasuk token.',
+      verifyAccount: 'Verifikasi Akun', verifying: 'Memverifikasi…',
+      open: 'Buka', emailVerified: 'Email terverifikasi',
+      readyForPremium: 'Akun Anda siap untuk aktivasi premium.',
+      activateInfo: 'Akses premium langsung aktif. Dapat dibatalkan kapan saja.',
+      activatePremium: 'Aktifkan Premium', activating: 'Mengaktifkan…',
+      tryAgain: 'Coba Lagi', premiumActivated: 'Premium aktif',
+      welcomePremium: 'Selamat datang di Premium. Akun Anda kini memiliki akses penuh.',
+      account: 'Akun', status: 'Status', premium: 'Premium',
+      activated: 'Diaktifkan', activateAnother: 'Aktifkan akun lain',
+      secure: 'Aman', instant: 'Instan', passwordless: 'Tanpa Password',
+      general: 'Umum', appearance: 'Tampilan',
+      generalDesc: 'Atur perilaku Nova di perangkat Anda.',
+      appearanceDesc: 'Sesuaikan tampilan Nova.',
+      languageSection: 'Bahasa', language: 'Bahasa',
+      languageHint: 'Bahasa antarmuka aplikasi',
+      interface: 'Antarmuka', layoutDensity: 'Kepadatan tata letak',
+      layoutDensityHint: 'Jarak nyaman atau tampilan padat',
+      animations: 'Animasi', animationsHint: 'Atur gerakan di seluruh antarmuka',
+      comfortable: 'Nyaman', compact: 'Padat',
+      full: 'Penuh', reduced: 'Dikurangi', off: 'Mati',
+      confirmations: 'Konfirmasi',
+      confirmClear: 'Konfirmasi sebelum menghapus riwayat',
+      confirmClearHint: 'Tanya sebelum menghapus data lokal',
+      notifications: 'Notifikasi',
+      notifSuccess: 'Notifikasi sukses',
+      notifSuccessHint: 'Tampilkan notifikasi saat aksi berhasil',
+      notifError: 'Notifikasi error',
+      notifErrorHint: 'Tampilkan notifikasi saat terjadi kesalahan',
+      themeSection: 'Tema', theme: 'Tema',
+      dark: 'Gelap', light: 'Terang', system: 'Sistem',
+      accentSection: 'Aksen', effects: 'Efek',
+      ambient: 'Cahaya sekitar', ambientHint: 'Suasana latar lembut',
+      bgEffects: 'Efek latar', bgEffectsHint: 'Overlay butiran dan kedalaman',
+      invalidEmail: 'Masukkan alamat email yang valid.',
+      pasteLink: 'Tempel tautan verifikasi dari email Anda.',
+      invalidLink: 'Tautan tampak tidak valid. Tempel URL lengkap dari email.',
+      verifyFailed: 'Verifikasi gagal. Tautan mungkin kedaluwarsa atau sudah digunakan.',
+      activateFailed: 'Aktivasi premium gagal. Coba lagi.',
+      linkSent: 'Tautan ajaib terkirim', linkSentDesc: 'Periksa kotak masuk Anda untuk melanjutkan.',
+      linkResent: 'Tautan ajaib dikirim ulang', linkResentDesc: 'Periksa kembali kotak masuk Anda.',
+      couldNotSend: 'Gagal mengirim tautan',
+      verificationFailed: 'Verifikasi gagal',
+      verificationFailedDesc: 'Minta tautan baru dan coba lagi.',
+      emailVerifiedToast: 'Email terverifikasi',
+      emailVerifiedDesc: 'Anda dapat mengaktifkan premium sekarang.',
+      premiumActivatedToast: 'Premium aktif',
+      premiumActivatedDesc: 'Akun Anda kini memiliki akses penuh.',
+      activationFailedToast: 'Aktivasi gagal',
+      resendIn: 'Kirim ulang dalam', resend: 'Kirim ulang tautan',
+      didNotReceive: 'Tidak menerima?',
+      languageChanged: 'Bahasa diubah',
+      languageChangedDesc: 'Antarmuka telah diperbarui.',
+      offline: 'Anda offline. Periksa koneksi Anda.',
+      online: 'Kembali online',
+      requestTimeout: 'Permintaan habis waktu. Coba lagi.',
+      networkError: 'Tidak dapat terhubung ke server. Periksa koneksi Anda dan coba lagi.',
+    }
+  };
+
+  /* ============================================================
+     CONSTANTS
+     ============================================================ */
+  var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  var RESEND_COOLDOWN = 60;
+
+  var PROVIDERS = {
+    'gmail.com':      { name: 'Gmail',       url: 'https://mail.google.com/' },
+    'googlemail.com': { name: 'Gmail',       url: 'https://mail.google.com/' },
+    'outlook.com':    { name: 'Outlook',     url: 'https://outlook.live.com/mail/' },
+    'hotmail.com':    { name: 'Outlook',     url: 'https://outlook.live.com/mail/' },
+    'live.com':       { name: 'Outlook',     url: 'https://outlook.live.com/mail/' },
+    'yahoo.com':      { name: 'Yahoo Mail',  url: 'https://mail.yahoo.com/' },
+    'icloud.com':     { name: 'iCloud Mail', url: 'https://www.icloud.com/mail' },
+    'me.com':         { name: 'iCloud Mail', url: 'https://www.icloud.com/mail' },
+    'proton.me':      { name: 'Proton Mail', url: 'https://mail.proton.me/' },
+    'protonmail.com': { name: 'Proton Mail', url: 'https://mail.proton.me/' },
+  };
+
+  var LANGUAGES = [
+    { code: 'id', name: 'Bahasa Indonesia' },
+    { code: 'en', name: 'English' },
+  ];
+
+  var ACCENTS = [
+    { value: 'purple-teal',   label: 'Purple + Teal' },
+    { value: 'blue-purple',   label: 'Blue + Purple' },
+    { value: 'pink-purple',   label: 'Pink + Purple' },
+    { value: 'orange-yellow', label: 'Yellow + Orange' },
+  ];
+
+  /* ============================================================
+     STATE
+     ============================================================ */
+  var state = {
+    view: 'activation',
+    settingsSection: 'general',
+    lang: 'id',
+    current: 'email',
+    email: '',
+    provider: null,
+    status: { email: 'pending', verify: 'pending', activate: 'pending', done: 'pending' },
+    busy: false,
+    error: null,
+    successScreen: false,
+    resendEndsAt: 0,
+    _resendTimer: null,
+    _abortController: null,
+  };
+
+  /* ============================================================
+     HELPERS
+     ============================================================ */
+  function $(s, r) { return (r || document).querySelector(s); }
+  function $$(s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); }
+  function icons() { if (window.lucide && typeof window.lucide.createIcons === 'function') window.lucide.createIcons(); }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c];
+    });
+  }
+  function maskEmail(email) {
+    if (!email || email.indexOf('@') === -1) return email || '';
+    var parts = email.split('@');
+    var u = parts[0], d = parts[1];
+    return u.length <= 2 ? (u.charAt(0) + '***@' + d) : (u.slice(0, 2) + '***@' + d);
+  }
+  function providerFor(email) {
+    var d = (email.split('@')[1] || '').toLowerCase();
+    return PROVIDERS[d] || null;
+  }
+  function t(key) {
+    var dict = I18N[state.lang] || I18N.en;
+    return dict[key] != null ? dict[key] : (I18N.en[key] != null ? I18N.en[key] : key);
+  }
+  function onMedia(mq, cb) {
+    if (mq.addEventListener) mq.addEventListener('change', cb);
+    else if (mq.addListener) mq.addListener(cb);
+  }
+
+  /* ============================================================
+     TRANSLATE STATIC UI
+     ============================================================ */
+  function translateStatic() {
+    document.documentElement.setAttribute('lang', state.lang);
+    $$('[data-i18n]').forEach(function (el) { el.textContent = t(el.dataset.i18n); });
+
+    var heroTitle = document.getElementById('hero-title');
+    if (heroTitle) {
+      if (state.lang === 'id') heroTitle.innerHTML = 'Aktivasi <span class="grad">Premium</span>';
+      else heroTitle.innerHTML = '<span class="grad">Premium</span> Activation';
+    }
+    $$('#theme-menu .menu-option').forEach(function (b) {
+      var val = b.dataset.themeValue;
+      var label = b.querySelector('span');
+      if (label) label.textContent = t(val);
+    });
+    $$('.settings-tab').forEach(function (tab) { tab.textContent = t(tab.dataset.section); });
+    $$('.view-tab').forEach(function (tab) {
+      tab.textContent = tab.dataset.view === 'activation' ? t('activation') : t('settings');
+    });
+    document.title = state.lang === 'id' ? 'Aktivasi Premium — Alight Motion' : 'Premium Activation — Alight Motion';
+  }
+
+  /* ============================================================
+     TOAST
+     ============================================================ */
+  function toastRegion() {
+    var r = document.getElementById('toast-region');
+    if (!r) {
+      r = document.createElement('div');
+      r.id = 'toast-region';
+      r.className = 'toast-region';
+      r.setAttribute('aria-live', 'polite');
+      document.body.appendChild(r);
+    }
+    return r;
+  }
+  var TOAST_ICON = { success:'check-circle-2', error:'alert-circle', info:'info', warning:'alert-triangle' };
+  function toast(type, title, desc, ttl) {
+    if (ttl == null) ttl = 3800;
+    if (type === 'success' && ls.get('nova.notifSuccess', '1') === '0') return;
+    if (type === 'error'   && ls.get('nova.notifError', '1') === '0') return;
+
+    var region = toastRegion();
+
+    // Batasi jumlah toast agar tidak menutupi layar
+    while (region.children.length >= CONFIG.MAX_TOASTS) {
+      var first = region.firstElementChild;
+      if (first) first.remove(); else break;
+    }
+
+    var el = document.createElement('div');
+    el.className = 'toast';
+    el.dataset.type = type;
+    el.setAttribute('role', type === 'error' ? 'alert' : 'status');
+    el.innerHTML =
+      '<i data-lucide="' + (TOAST_ICON[type] || 'info') + '" class="toast-icon"></i>' +
+      '<div style="min-width:0;flex:1">' +
+        '<div class="toast-title">' + esc(title) + '</div>' +
+        (desc ? '<div class="toast-desc">' + esc(desc) + '</div>' : '') +
+      '</div>' +
+      '<button class="toast-close" aria-label="Tutup"><i data-lucide="x"></i></button>';
+    region.appendChild(el);
+    icons();
+
+    var remove = function () {
+      if (!el.parentNode) return;
+      el.classList.add('is-leaving');
+      var done = false;
+      var cleanup = function () { if (!done) { done = true; if (el.parentNode) el.remove(); } };
+      el.addEventListener('animationend', cleanup);
+      setTimeout(cleanup, 400);
+    };
+    el.querySelector('.toast-close').addEventListener('click', remove);
+    if (ttl > 0) setTimeout(remove, ttl);
+  }
+
+  /* ============================================================
+     THEME / ACCENT / DENSITY / MOTION / AMBIENT
+     ============================================================ */
+  function getTheme() { return ls.get('nova.theme', 'dark'); }
+  function applyTheme(pref) {
+    var dark = true;
+    try { dark = matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) {}
+    var resolved = pref === 'system' ? (dark ? 'dark' : 'light') : pref;
+    document.documentElement.setAttribute('data-theme', resolved);
+    document.documentElement.setAttribute('data-theme-pref', pref);
+    var icon = document.getElementById('theme-icon');
+    if (icon) icon.setAttribute('data-lucide', resolved === 'dark' ? 'moon' : 'sun');
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', resolved === 'dark' ? '#080C16' : '#EEF0F7');
+    $$('#theme-menu .menu-option').forEach(function (b) {
+      b.classList.toggle('is-active', b.dataset.themeValue === pref);
+    });
+    icons();
+  }
+  function setTheme(v) { ls.set('nova.theme', v); applyTheme(v); }
+
+  function getAccent() { return ls.get('nova.accent', 'purple-teal'); }
+  function setAccent(v) {
+    ls.set('nova.accent', v);
+    document.documentElement.setAttribute('data-accent', v);
+    $$('.accent-swatch').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.dataset.accentValue === v));
+    });
+  }
+
+  function getDensity() { return ls.get('nova.density', 'comfortable'); }
+  function setDensity(v) {
+    ls.set('nova.density', v);
+    document.documentElement.setAttribute('data-density', v);
+  }
+
+  function getMotion() { return ls.get('nova.motion', 'full'); }
+  function setMotion(v) {
+    ls.set('nova.motion', v);
+    document.documentElement.classList.toggle('reduce-motion', v === 'reduced');
+    document.documentElement.classList.toggle('no-motion', v === 'off');
+  }
+
+  function getAmbient() { return ls.get('nova.ambient', 'on'); }
+  function setAmbient(v) {
+    ls.set('nova.ambient', v);
+    document.documentElement.setAttribute('data-ambient', v);
+  }
+
+  function getBgEffects() { return ls.get('nova.bgEffects', 'on'); }
+  function setBgEffects(v) {
+    ls.set('nova.bgEffects', v);
+    document.documentElement.setAttribute('data-bg-effects', v);
+  }
+
+  /* ============================================================
+     LANGUAGE
+     ============================================================ */
+  function setLanguage(code) {
+    if (!I18N[code]) return;
+    state.lang = code;
+    ls.set('nova.lang', code);
+    document.documentElement.setAttribute('lang', code);
+    translateStatic();
+    renderStepper();
+    renderCard();
+    renderSettingsSection(state.settingsSection);
+    updateLangButton();
+    icons();
+  }
+  function updateLangButton() {
+    var lang = LANGUAGES.filter(function (l) { return l.code === state.lang; })[0] || LANGUAGES[0];
+    var nameEl = document.getElementById('lang-name');
+    if (nameEl) nameEl.textContent = lang.name;
+  }
+
+  /* ============================================================
+     STEPPER
+     ============================================================ */
+  var STEPS = [
+    { key: 'email',    labelKey: 'stepEmail',        num: '01' },
+    { key: 'verify',   labelKey: 'stepVerification', num: '02' },
+    { key: 'activate', labelKey: 'stepActivation',   num: '03' },
+    { key: 'done',     labelKey: 'stepComplete',     num: '04' },
+  ];
+
+  function renderStepper() {
+    var order = STEPS.map(function (s) { return s.key; });
+    var el = document.getElementById('stepper');
+    if (!el) return;
+    el.innerHTML = STEPS.map(function (s, i) {
+      var st = state.status[s.key];
+      var vStatus = 'pending';
+      if (st === 'completed') vStatus = 'completed';
+      else if (st === 'failed') vStatus = 'failed';
+      else if (st === 'processing') vStatus = 'processing';
+      else if (state.current === s.key) vStatus = 'active';
+
+      var isFirst = i === 0;
+      var prevCompleted = i > 0 && state.status[order[i - 1]] === 'completed';
+      var lineState = prevCompleted ? 'filled' : 'idle';
+
+      var inner;
+      if (vStatus === 'completed' || (vStatus === 'active' && state.successScreen)) {
+        inner = '<i data-lucide="check"></i>';
+      } else if (vStatus === 'processing') {
+        inner = '<span class="spinner" style="width:12px;height:12px;border-width:2px;"></span>';
+      } else if (vStatus === 'failed') {
+        inner = '<i data-lucide="x"></i>';
+      } else {
+        inner = '<span>' + s.num + '</span>';
+      }
+
+      return '<li class="step" data-status="' + vStatus + '" data-line="' + (isFirst ? 'none' : lineState) + '">' +
+        '<span class="step-marker" aria-hidden="true">' + inner + '</span>' +
+        '<span class="step-label"><span class="step-num">' + s.num + '</span>' + esc(t(s.labelKey)) + '</span>' +
+        '<span class="sr-only">' + vStatus + '</span>' +
+      '</li>';
+    }).join('');
+    icons();
+  }
+
+  /* ============================================================
+     ORB
+     ============================================================ */
+  var ORB_ICONS = { idle: 'mail', sending: 'loader', sent: 'mail-check', verifying: 'shield', verified: 'check' };
+  function setOrbState(s) {
+    var orb = document.getElementById('orb');
+    var icon = document.getElementById('orb-icon');
+    if (!orb || !icon) return;
+    orb.setAttribute('data-state', s);
+    icon.setAttribute('data-lucide', ORB_ICONS[s] || 'mail');
+    icons();
+  }
+
+  /* ============================================================
+     RENDER ACTIVATION CARD
+     ============================================================ */
+  function renderCard() {
+    if (state.successScreen) return renderSuccess();
+    if (state.current === 'email') return renderEmailStep();
+    if (state.current === 'verify') return renderVerifyStep();
+    if (state.current === 'activate') return renderActivateStep();
+  }
+
+  function renderEmailStep() {
+    var busy = state.busy;
+    var err = state.error;
+    var el = document.getElementById('activation-card');
+    el.innerHTML =
+      '<div style="animation:view-in 320ms var(--ease-out) both">' +
+        '<div class="card-head">' +
+          '<span class="card-icon"><i data-lucide="mail"></i></span>' +
+          '<div style="min-width:0">' +
+            '<h2 class="card-title">' + esc(t('enterYourEmail')) + '</h2>' +
+            '<p class="card-desc">' + esc(t('emailDesc')) + '</p>' +
+          '</div>' +
+        '</div>' +
+        '<form id="email-form" novalidate>' +
+          '<div class="field">' +
+            '<label for="email-input" class="field-label">' + esc(t('emailLabel')) + '</label>' +
+            '<div class="input-wrap">' +
+              '<i data-lucide="mail" class="input-icon"></i>' +
+              '<input id="email-input" type="email" class="input" ' +
+                'placeholder="' + esc(t('emailPlaceholder')) + '" ' +
+                'autocomplete="email" inputmode="email" spellcheck="false" autocapitalize="off" ' +
+                'value="' + esc(state.email) + '" ' + (busy ? 'disabled' : '') + ' />' +
+            '</div>' +
+            (err
+              ? '<div class="helper is-error"><i data-lucide="alert-circle"></i><span>' + esc(err) + '</span></div>'
+              : '<div class="helper"><i data-lucide="info"></i><span>' + esc(t('emailHint')) + '</span></div>') +
+          '</div>' +
+          '<button type="submit" class="btn btn-primary btn-block" ' + (busy ? 'disabled' : '') + ' data-ripple>' +
+            (busy
+              ? '<span class="spinner"></span><span>' + esc(t('sending')) + '</span>'
+              : '<span>' + esc(t('sendMagicLink')) + '</span><i data-lucide="arrow-right"></i>') +
+          '</button>' +
+        '</form>' +
+      '</div>';
+    icons();
+    attachRipple();
+
+    var form = document.getElementById('email-form');
+    var input = document.getElementById('email-input');
+    if (form && input) {
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var value = input.value.trim();
+        if (!EMAIL_RE.test(value)) {
+          state.error = t('invalidEmail');
+          renderCard();
+          setTimeout(function () { var i = document.getElementById('email-input'); if (i) i.focus(); }, 30);
+          return;
+        }
+        state.email = value;
+        state.provider = providerFor(value);
+        state.error = null;
+        sendMagicLink(value);
+      });
+      if (!busy) setTimeout(function () { input.focus(); }, 60);
+    }
+  }
+
+  function renderVerifyStep() {
+    var busy = state.busy;
+    var err = state.error;
+    var remaining = Math.max(0, Math.ceil((state.resendEndsAt - Date.now()) / 1000));
+    var showProvider = state.provider != null;
+
+    var el = document.getElementById('activation-card');
+    el.innerHTML =
+      '<div style="animation:view-in 320ms var(--ease-out) both">' +
+        '<div class="card-head">' +
+          '<span class="card-icon is-success"><i data-lucide="mail-check"></i></span>' +
+          '<div style="min-width:0">' +
+            '<h2 class="card-title">' + esc(t('checkYourInbox')) + '</h2>' +
+            '<p class="card-desc">' + esc(t('sentTo')) + ' <strong>' + esc(maskEmail(state.email)) + '</strong></p>' +
+          '</div>' +
+        '</div>' +
+        (showProvider
+          ? '<a href="' + esc(state.provider.url) + '" target="_blank" rel="noopener noreferrer" ' +
+              'class="btn btn-secondary btn-block" style="margin-bottom:14px" data-ripple>' +
+              '<i data-lucide="external-link"></i>' +
+              '<span>' + esc(t('open')) + ' ' + esc(state.provider.name) + '</span>' +
+            '</a>'
+          : '') +
+        '<div class="info-strip is-info">' +
+          '<i data-lucide="clock"></i>' +
+          '<span>' + esc(t('linkExpires')) + '</span>' +
+        '</div>' +
+        '<form id="verify-form" novalidate>' +
+          '<div class="field">' +
+            '<label for="link-input" class="field-label">' + esc(t('verificationLink')) + '</label>' +
+            '<div class="input-wrap">' +
+              '<i data-lucide="link" class="input-icon"></i>' +
+              '<input id="link-input" type="url" class="input" ' +
+                'placeholder="https://alightcreative.com/auth/…" ' +
+                'autocomplete="off" spellcheck="false" ' + (busy ? 'disabled' : '') + ' />' +
+            '</div>' +
+            (err
+              ? '<div class="helper is-error"><i data-lucide="alert-circle"></i><span>' + esc(err) + '</span></div>'
+              : '<div class="helper"><i data-lucide="info"></i><span>' + esc(t('linkHint')) + '</span></div>') +
+          '</div>' +
+          '<button type="submit" class="btn btn-primary btn-block" ' + (busy ? 'disabled' : '') + ' data-ripple>' +
+            (busy
+              ? '<span class="spinner"></span><span>' + esc(t('verifying')) + '</span>'
+              : '<i data-lucide="shield-check"></i><span>' + esc(t('verifyAccount')) + '</span>') +
+          '</button>' +
+        '</form>' +
+        '<div class="resend-row">' +
+          '<span>' + esc(t('didNotReceive')) + '</span>' +
+          '<button id="resend-btn" class="resend-btn" ' + ((busy || remaining > 0) ? 'disabled' : '') + '>' +
+            (remaining > 0 ? esc(t('resendIn')) + ' ' + remaining + 's' : esc(t('resend'))) +
+          '</button>' +
+        '</div>' +
+      '</div>';
+    icons();
+    attachRipple();
+
+    if (!busy) setTimeout(function () { var i = document.getElementById('link-input'); if (i) i.focus(); }, 60);
+
+    var vForm = document.getElementById('verify-form');
+    if (vForm) {
+      vForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var raw = document.getElementById('link-input').value.trim();
+        if (!raw) { state.error = t('pasteLink'); renderCard(); return; }
+        if (!/^https?:\/\//i.test(raw)) { state.error = t('invalidLink'); renderCard(); return; }
+        state.error = null;
+        verifyAccount(raw);
+      });
+    }
+
+    var resendBtn = document.getElementById('resend-btn');
+    if (resendBtn && !resendBtn.disabled) {
+      resendBtn.addEventListener('click', function () { sendMagicLink(state.email, { silent: true }); });
+    }
+
+    if (remaining > 0 && !state._resendTimer) {
+      state._resendTimer = setInterval(function () {
+        if (state.current !== 'verify') {
+          clearInterval(state._resendTimer);
+          state._resendTimer = null;
+          return;
+        }
+        var r = Math.max(0, Math.ceil((state.resendEndsAt - Date.now()) / 1000));
+        var btn = document.getElementById('resend-btn');
+        if (!btn) return;
+        if (r <= 0) {
+          btn.disabled = false;
+          btn.textContent = t('resend');
+          ls.del('nova.resendEndsAt');
+          clearInterval(state._resendTimer);
+          state._resendTimer = null;
+        } else {
+          btn.textContent = t('resendIn') + ' ' + r + 's';
+        }
+      }, 1000);
+    }
+  }
+
+  function renderActivateStep() {
+    var busy = state.busy;
+    var err = state.error;
+    var el = document.getElementById('activation-card');
+    el.innerHTML =
+      '<div style="animation:view-in 320ms var(--ease-out) both">' +
+        '<div class="card-head">' +
+          '<span class="card-icon"><i data-lucide="sparkles"></i></span>' +
+          '<div style="min-width:0">' +
+            '<h2 class="card-title">' + esc(t('emailVerified')) + '</h2>' +
+            '<p class="card-desc">' + esc(t('readyForPremium')) + '</p>' +
+          '</div>' +
+        '</div>' +
+        '<div class="info-strip is-info">' +
+          '<i data-lucide="zap"></i>' +
+          '<span>' + esc(t('activateInfo')) + '</span>' +
+        '</div>' +
+        (err ? '<div class="info-strip is-danger"><i data-lucide="alert-circle"></i><span>' + esc(err) + '</span></div>' : '') +
+        '<button id="activate-btn" class="btn btn-primary btn-block" ' + (busy ? 'disabled' : '') + ' data-ripple>' +
+          (busy
+            ? '<span class="spinner"></span><span>' + esc(t('activating')) + '</span>'
+            : '<i data-lucide="zap"></i><span>' + esc(t('activatePremium')) + '</span>') +
+        '</button>' +
+        (err
+          ? '<button id="retry-btn" class="btn btn-ghost btn-block" style="margin-top:8px">' +
+              '<i data-lucide="rotate-ccw"></i><span>' + esc(t('tryAgain')) + '</span>' +
+            '</button>'
+          : '') +
+      '</div>';
+    icons();
+    attachRipple();
+
+    var actBtn = document.getElementById('activate-btn');
+    if (actBtn) actBtn.addEventListener('click', applyPremium);
+    var retryBtn = document.getElementById('retry-btn');
+    if (retryBtn) retryBtn.addEventListener('click', function () { state.error = null; renderCard(); });
+  }
+
+  function renderSuccess() {
+    var el = document.getElementById('activation-card');
+    el.innerHTML =
+      '<div class="success-screen">' +
+        '<div class="success-icon"><i data-lucide="check"></i></div>' +
+        '<h2>' + esc(t('premiumActivated')) + '</h2>' +
+        '<p>' + esc(t('welcomePremium')) + '</p>' +
+        '<div class="summary">' +
+          '<div class="summary-row"><span class="k">' + esc(t('account')) + '</span>' +
+            '<span class="v">' + esc(maskEmail(state.email)) + '</span></div>' +
+          '<div class="summary-row"><span class="k">' + esc(t('status')) + '</span>' +
+            '<span class="v"><span class="badge badge-success"><i data-lucide="check"></i>' + esc(t('premium')) + '</span></span></div>' +
+          '<div class="summary-row"><span class="k">' + esc(t('activated')) + '</span>' +
+            '<span class="v">' + new Date().toLocaleString(state.lang === 'id' ? 'id-ID' : 'en-US') + '</span></div>' +
+        '</div>' +
+        '<button id="restart-btn" class="btn btn-secondary btn-block" style="margin-top:20px" data-ripple>' +
+          '<i data-lucide="rotate-ccw"></i><span>' + esc(t('activateAnother')) + '</span>' +
+        '</button>' +
+      '</div>';
+    icons();
+    attachRipple();
+
+    var rBtn = document.getElementById('restart-btn');
+    if (rBtn) rBtn.addEventListener('click', function () {
+      state.current = 'email';
+      state.email = '';
+      state.provider = null;
+      state.successScreen = false;
+      state.status = { email: 'pending', verify: 'pending', activate: 'pending', done: 'pending' };
+      state.error = null;
+      state.resendEndsAt = 0;
+      ls.del('nova.resendEndsAt');
+      setOrbState('idle');
+      renderStepper();
+      renderCard();
+    });
+  }
+
+  function attachRipple() {
+    $$('[data-ripple]').forEach(function (btn) {
+      if (btn._hasRipple) return;
+      btn._hasRipple = true;
+      btn.addEventListener('click', function (e) {
+        // skip ripple saat reduced-motion atau no-motion
+        var root = document.documentElement;
+        if (root.classList.contains('reduce-motion') || root.classList.contains('no-motion')) return;
+        var rect = this.getBoundingClientRect();
+        var size = Math.max(rect.width, rect.height);
+        var x = (e.clientX || (rect.left + rect.width / 2)) - rect.left - size / 2;
+        var y = (e.clientY || (rect.top + rect.height / 2)) - rect.top - size / 2;
+        var ripple = document.createElement('span');
+        ripple.className = 'ripple';
+        ripple.style.width = ripple.style.height = size + 'px';
+        ripple.style.left = x + 'px';
+        ripple.style.top = y + 'px';
+        this.appendChild(ripple);
+        setTimeout(function () { if (ripple.parentNode) ripple.remove(); }, 650);
+      });
+    });
+  }
+
+  /* ============================================================
+     API — dengan timeout, abort, offline detection
+     ============================================================ */
+  function apiFetch(path, body) {
+    // batalkan request sebelumnya jika masih berjalan
+    if (state._abortController) {
+      try { state._abortController.abort(); } catch (e) {}
+    }
+    var controller = new AbortController();
+    state._abortController = controller;
+
+    var timeoutId = setTimeout(function () {
+      try { controller.abort(); } catch (e) {}
+    }, CONFIG.API_TIMEOUT);
+
+    var url = CONFIG.API_BASE + path;
+
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    }).then(function (res) {
+      return res.text().then(function (text) {
+        var data = null;
+        try { data = text ? JSON.parse(text) : null; } catch (e) { data = null; }
+        if (!res.ok) {
+          var message = (data && data.message) ||
+            (res.status === 429 ? 'Terlalu banyak permintaan. Tunggu sebentar.' :
+             res.status >= 500 ? 'Server sedang tidak tersedia. Coba lagi nanti.' :
+             'Terjadi kesalahan. Silakan coba lagi.');
+          var err = new Error(message);
+          err.status = res.status;
+          throw err;
+        }
+        return data;
+      });
+    }).catch(function (e) {
+      if (e && e.name === 'AbortError') {
+        throw new Error(t('requestTimeout'));
+      }
+      if (!navigator.onLine) {
+        throw new Error(t('networkError'));
+      }
+      if (e && e.message) throw e;
+      throw new Error(t('networkError'));
+    }).finally(function () {
+      clearTimeout(timeoutId);
+      state._abortController = null;
+    });
+  }
+
+  /* ============================================================
+     ACTIONS
+     ============================================================ */
+  function sendMagicLink(email, opts) {
+    opts = opts || {};
+    var silent = opts.silent === true;
+    if (state.busy) return;
+    if (!navigator.onLine) {
+      toast('error', t('offline'), '');
+      return;
+    }
+    state.busy = true;
+    state.error = null;
+    state.status.email = 'processing';
+    setOrbState('sending');
+    renderStepper();
+    renderCard();
+
+    apiFetch('/api/send-magiclink', { email: email })
+      .then(function () {
+        ls.set('nova.lastEmail', email);
+        state.resendEndsAt = Date.now() + RESEND_COOLDOWN * 1000;
+        ls.set('nova.resendEndsAt', String(state.resendEndsAt));
+        state.status.email = 'completed';
+        state.status.verify = 'processing';
+        state.current = 'verify';
+        state.provider = providerFor(email);
+        setOrbState('sent');
+        renderStepper();
+        renderCard();
+        toast(
+          silent ? 'info' : 'success',
+          silent ? t('linkResent') : t('linkSent'),
+          silent ? t('linkResentDesc') : t('linkSentDesc')
+        );
+      })
+      .catch(function (err) {
+        state.status.email = 'failed';
+        state.error = err.message;
+        setOrbState('idle');
+        toast('error', t('couldNotSend'), err.message);
+      })
+      .then(function () {
+        state.busy = false;
+        renderStepper();
+        renderCard();
+      });
+  }
+
+  function verifyAccount(rawLink) {
+    if (state.busy) return;
+    if (!navigator.onLine) { toast('error', t('offline'), ''); return; }
+    state.busy = true;
+    state.error = null;
+    state.status.verify = 'processing';
+    setOrbState('verifying');
+    renderStepper();
+    renderCard();
+
+    apiFetch('/api/verify-account', { email: state.email, rawLink: rawLink })
+      .then(function (data) {
+        // type-safe check: terima boolean, string "true", atau angka 1
+        var ok = data && (data.verified === true || data.verified === 'true' || data.verified === 1);
+        if (!ok) {
+          var e = new Error(t('verifyFailed'));
+          e.status = 400;
+          throw e;
+        }
+        return new Promise(function (resolve) { setTimeout(resolve, 400); });
+      })
+      .then(function () {
+        setOrbState('verified');
+        state.status.verify = 'completed';
+        state.status.activate = 'processing';
+        state.current = 'activate';
+        renderStepper();
+        renderCard();
+        toast('success', t('emailVerifiedToast'), t('emailVerifiedDesc'));
+      })
+      .catch(function (err) {
+        state.status.verify = 'failed';
+        state.error = err.message;
+        setOrbState('sent');
+        toast('error', t('verificationFailed'), t('verificationFailedDesc'));
+      })
+      .then(function () {
+        state.busy = false;
+        renderStepper();
+        renderCard();
+      });
+  }
+
+  function applyPremium() {
+    if (state.busy) return;
+    if (!navigator.onLine) { toast('error', t('offline'), ''); return; }
+    state.busy = true;
+    state.error = null;
+    state.status.activate = 'processing';
+    renderStepper();
+    renderCard();
+
+    apiFetch('/api/apply-premium', { email: state.email })
+      .then(function (data) {
+        var ok = data && (data.success === true || data.success === 'true' || data.success === 1);
+        if (!ok) throw new Error(t('activateFailed'));
+        return new Promise(function (resolve) { setTimeout(resolve, 320); });
+      })
+      .then(function () {
+        state.status.activate = 'completed';
+        state.status.done = 'completed';
+        state.current = 'done';
+        state.successScreen = true;
+        renderStepper();
+        renderCard();
+        toast('success', t('premiumActivatedToast'), t('premiumActivatedDesc'));
+      })
+      .catch(function (err) {
+        state.status.activate = 'failed';
+        state.error = err.message;
+        toast('error', t('activationFailedToast'), err.message);
+      })
+      .then(function () {
+        state.busy = false;
+        renderStepper();
+        renderCard();
+      });
+  }
+
+  /* ============================================================
+     SETTINGS RENDER
+     ============================================================ */
+  function renderSettingsSection(section) {
+    state.settingsSection = section;
+    $$('.settings-tab').forEach(function (tab) {
+      var active = tab.dataset.section === section;
+      tab.classList.toggle('is-active', active);
+      tab.setAttribute('aria-selected', String(active));
+    });
+    var el = document.getElementById('settings-content');
+    el.innerHTML = '';
+    if (section === 'appearance') renderAppearanceSection();
+    else renderGeneralSection();
+    icons();
+    attachRipple();
+    bindSettingsControls();
+    updateLangButton();
+  }
+
+  function renderGeneralSection() {
+    var el = document.getElementById('settings-content');
+    var currentLang = state.lang;
+    var currentLangName = (LANGUAGES.filter(function (l) { return l.code === currentLang; })[0] || LANGUAGES[0]).name;
+    var density = getDensity();
+    var motion = getMotion();
+    var confirmClear = ls.get('nova.confirmClear', '1') === '1';
+    var notifSuccess = ls.get('nova.notifSuccess', '1') === '1';
+    var notifError = ls.get('nova.notifError', '1') === '1';
+
+    el.innerHTML =
+      '<section class="settings-section">' +
+        '<div class="section-head">' +
+          '<h2>' + esc(t('general')) + '</h2>' +
+          '<p>' + esc(t('generalDesc')) + '</p>' +
+        '</div>' +
+
+        '<div class="settings-group">' +
+          '<div class="group-label">' + esc(t('languageSection')) + '</div>' +
+          '<div class="srow">' +
+            '<div class="srow-info">' +
+              '<div class="srow-label">' + esc(t('language')) + '</div>' +
+              '<div class="srow-hint">' + esc(t('languageHint')) + '</div>' +
+            '</div>' +
+            '<div class="srow-control">' +
+              '<div class="lang-wrap" id="lang-wrap">' +
+                '<button class="lang-btn" id="lang-btn" aria-haspopup="listbox" aria-expanded="false">' +
+                  '<i data-lucide="languages" class="lang-icon"></i>' +
+                  '<span id="lang-name">' + esc(currentLangName) + '</span>' +
+                  '<i data-lucide="chevron-down" class="chev"></i>' +
+                '</button>' +
+                '<div class="lang-menu" id="lang-menu" role="listbox" hidden>' +
+                  LANGUAGES.map(function (l) {
+                    return '<button class="lang-option ' + (l.code === currentLang ? 'is-active' : '') + '" data-lang="' + l.code + '" role="option" aria-selected="' + (l.code === currentLang) + '">' +
+                      '<i data-lucide="globe" class="opt-icon"></i>' +
+                      '<span class="opt-name">' + esc(l.name) + '</span>' +
+                      '<i data-lucide="check" class="opt-check"></i>' +
+                    '</button>';
+                  }).join('') +
+                '</div>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="settings-group">' +
+          '<div class="group-label">' + esc(t('interface')) + '</div>' +
+          '<div class="srow">' +
+            '<div class="srow-info">' +
+              '<div class="srow-label">' + esc(t('layoutDensity')) + '</div>' +
+              '<div class="srow-hint">' + esc(t('layoutDensityHint')) + '</div>' +
+            '</div>' +
+            '<div class="srow-control">' +
+              '<div class="segmented" data-seg="density">' +
+                '<button data-val="comfortable" aria-pressed="' + (density === 'comfortable') + '">' + esc(t('comfortable')) + '</button>' +
+                '<button data-val="compact" aria-pressed="' + (density === 'compact') + '">' + esc(t('compact')) + '</button>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="srow">' +
+            '<div class="srow-info">' +
+              '<div class="srow-label">' + esc(t('animations')) + '</div>' +
+              '<div class="srow-hint">' + esc(t('animationsHint')) + '</div>' +
+            '</div>' +
+            '<div class="srow-control">' +
+              '<div class="segmented" data-seg="motion">' +
+                '<button data-val="full" aria-pressed="' + (motion === 'full') + '">' + esc(t('full')) + '</button>' +
+                '<button data-val="reduced" aria-pressed="' + (motion === 'reduced') + '">' + esc(t('reduced')) + '</button>' +
+                '<button data-val="off" aria-pressed="' + (motion === 'off') + '">' + esc(t('off')) + '</button>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="settings-group">' +
+          '<div class="group-label">' + esc(t('confirmations')) + '</div>' +
+          '<div class="srow">' +
+            '<div class="srow-info">' +
+              '<div class="srow-label">' + esc(t('confirmClear')) + '</div>' +
+              '<div class="srow-hint">' + esc(t('confirmClearHint')) + '</div>' +
+            '</div>' +
+            '<div class="srow-control">' +
+              '<button class="switch" data-toggle="nova.confirmClear" role="switch" aria-checked="' + confirmClear + '"></button>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="settings-group">' +
+          '<div class="group-label">' + esc(t('notifications')) + '</div>' +
+          '<div class="srow">' +
+            '<div class="srow-info">' +
+              '<div class="srow-label">' + esc(t('notifSuccess')) + '</div>' +
+              '<div class="srow-hint">' + esc(t('notifSuccessHint')) + '</div>' +
+            '</div>' +
+            '<div class="srow-control">' +
+              '<button class="switch" data-toggle="nova.notifSuccess" role="switch" aria-checked="' + notifSuccess + '"></button>' +
+            '</div>' +
+          '</div>' +
+          '<div class="srow">' +
+            '<div class="srow-info">' +
+              '<div class="srow-label">' + esc(t('notifError')) + '</div>' +
+              '<div class="srow-hint">' + esc(t('notifErrorHint')) + '</div>' +
+            '</div>' +
+            '<div class="srow-control">' +
+              '<button class="switch" data-toggle="nova.notifError" role="switch" aria-checked="' + notifError + '"></button>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</section>';
+    icons();
+  }
+
+  function renderAppearanceSection() {
+    var el = document.getElementById('settings-content');
+    var theme = getTheme();
+    var accent = getAccent();
+    var ambient = getAmbient();
+    var bgEffects = getBgEffects();
+
+    el.innerHTML =
+      '<section class="settings-section">' +
+        '<div class="section-head">' +
+          '<h2>' + esc(t('appearance')) + '</h2>' +
+          '<p>' + esc(t('appearanceDesc')) + '</p>' +
+        '</div>' +
+
+        '<div class="settings-group">' +
+          '<div class="group-label">' + esc(t('themeSection')) + '</div>' +
+          '<div class="srow">' +
+            '<div class="srow-info"><div class="srow-label">' + esc(t('theme')) + '</div></div>' +
+            '<div class="srow-control">' +
+              '<div class="segmented" data-seg="theme">' +
+                '<button data-val="dark" data-theme-value="dark" aria-pressed="' + (theme === 'dark') + '">' + esc(t('dark')) + '</button>' +
+                '<button data-val="light" data-theme-value="light" aria-pressed="' + (theme === 'light') + '">' + esc(t('light')) + '</button>' +
+                '<button data-val="system" data-theme-value="system" aria-pressed="' + (theme === 'system') + '">' + esc(t('system')) + '</button>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="settings-group">' +
+          '<div class="group-label">' + esc(t('accentSection')) + '</div>' +
+          '<div style="padding:12px 16px 16px">' +
+            '<div class="accent-grid">' +
+              ACCENTS.map(function (a) {
+                return '<button class="accent-swatch" data-accent-value="' + a.value + '" aria-pressed="' + (a.value === accent) + '">' +
+                  '<div class="accent-swatch-preview">' +
+                    '<span class="accent-swatch-dot"></span>' +
+                    '<span class="accent-swatch-dot"></span>' +
+                  '</div>' +
+                  '<div class="accent-swatch-name">' + esc(a.label) + '</div>' +
+                '</button>';
+              }).join('') +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="settings-group">' +
+          '<div class="group-label">' + esc(t('effects')) + '</div>' +
+          '<div class="srow">' +
+            '<div class="srow-info">' +
+              '<div class="srow-label">' + esc(t('ambient')) + '</div>' +
+              '<div class="srow-hint">' + esc(t('ambientHint')) + '</div>' +
+            '</div>' +
+            '<div class="srow-control">' +
+              '<button class="switch" data-toggle="nova.ambient" data-toggle-type="onoff" role="switch" aria-checked="' + (ambient === 'on') + '"></button>' +
+            '</div>' +
+          '</div>' +
+          '<div class="srow">' +
+            '<div class="srow-info">' +
+              '<div class="srow-label">' + esc(t('bgEffects')) + '</div>' +
+              '<div class="srow-hint">' + esc(t('bgEffectsHint')) + '</div>' +
+            '</div>' +
+            '<div class="srow-control">' +
+              '<button class="switch" data-toggle="nova.bgEffects" data-toggle-type="onoff" role="switch" aria-checked="' + (bgEffects === 'on') + '"></button>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</section>';
+    icons();
+  }
+
+  function bindSettingsControls() {
+    $$('.segmented[data-seg]').forEach(function (seg) {
+      var key = seg.dataset.seg;
+      seg.addEventListener('click', function (e) {
+        var btn = e.target.closest('button');
+        if (!btn) return;
+        var val = btn.dataset.val;
+        if (!val) return;
+        if (key === 'density') setDensity(val);
+        else if (key === 'motion') setMotion(val);
+        else if (key === 'theme') setTheme(val);
+        seg.querySelectorAll('button').forEach(function (b) {
+          b.setAttribute('aria-pressed', String(b.dataset.val === val));
+        });
+      });
+    });
+
+    $$('.accent-swatch').forEach(function (b) {
+      b.addEventListener('click', function () { setAccent(b.dataset.accentValue); });
+    });
+
+    $$('.switch[data-toggle]').forEach(function (sw) {
+      sw.addEventListener('click', function () {
+        var key = sw.dataset.toggle;
+        var type = sw.dataset.toggleType;
+        var current = sw.getAttribute('aria-checked') === 'true';
+        var next = !current;
+        if (type === 'onoff') {
+          ls.set(key, next ? 'on' : 'off');
+          if (key === 'nova.ambient') setAmbient(next ? 'on' : 'off');
+          if (key === 'nova.bgEffects') setBgEffects(next ? 'on' : 'off');
+        } else {
+          ls.set(key, next ? '1' : '0');
+        }
+        sw.setAttribute('aria-checked', String(next));
+      });
+    });
+
+    var langBtn = document.getElementById('lang-btn');
+    var langMenu = document.getElementById('lang-menu');
+    if (langBtn && langMenu) {
+      langBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var open = langBtn.getAttribute('aria-expanded') === 'true';
+        if (open) closeLangMenu();
+        else {
+          langBtn.setAttribute('aria-expanded', 'true');
+          langMenu.removeAttribute('hidden');
+          icons();
+        }
+      });
+
+      langMenu.querySelectorAll('.lang-option').forEach(function (opt) {
+        opt.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var code = opt.dataset.lang;
+          closeLangMenu();
+          if (code !== state.lang) {
+            setLanguage(code);
+            toast('info', t('languageChanged'), t('languageChangedDesc'));
+          }
+        });
+      });
+    }
+  }
+
+  function closeLangMenu() {
+    var langBtn = document.getElementById('lang-btn');
+    var langMenu = document.getElementById('lang-menu');
+    if (langBtn) langBtn.setAttribute('aria-expanded', 'false');
+    if (langMenu) langMenu.setAttribute('hidden', '');
+  }
+
+  function anyDropdownOpen() {
+    var langBtn = document.getElementById('lang-btn');
+    var themeMenu = document.getElementById('theme-menu');
+    return (langBtn && langBtn.getAttribute('aria-expanded') === 'true') ||
+           (themeMenu && !themeMenu.hasAttribute('hidden'));
+  }
+
+  function closeAllDropdowns() {
+    closeLangMenu();
+    var themeMenu = document.getElementById('theme-menu');
+    var themeBtn = document.getElementById('theme-btn');
+    if (themeMenu && !themeMenu.hasAttribute('hidden')) {
+      themeMenu.setAttribute('hidden', '');
+      themeBtn.setAttribute('aria-expanded', 'false');
+    }
+  }
+
+  document.addEventListener('click', function () {
+    closeAllDropdowns();
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeAllDropdowns();
+  });
+
+  /* ============================================================
+     ANDROID HARDWARE BACK BUTTON
+     Push state saat dropdown terbuka, intercept back untuk close.
+     ============================================================ */
+  function pushBackGuard() {
+    try { history.pushState({ nova: true }, ''); } catch (e) {}
+  }
+  window.addEventListener('popstate', function () {
+    if (anyDropdownOpen()) {
+      closeAllDropdowns();
+      pushBackGuard();
+    }
+  });
+
+  /* ============================================================
+     VIEW ROUTER
+     ============================================================ */
+  function setView(view) {
+    state.view = view;
+    $$('.view-tab').forEach(function (b) {
+      var active = b.dataset.view === view;
+      b.classList.toggle('is-active', active);
+      b.setAttribute('aria-selected', String(active));
+    });
+    document.getElementById('view-activation').hidden = view !== 'activation';
+    document.getElementById('view-settings').hidden = view !== 'settings';
+    if (view === 'settings') renderSettingsSection(state.settingsSection);
+    window.scrollTo(0, 0);
+  }
+
+  /* ============================================================
+     HEADER BINDINGS
+     ============================================================ */
+  function bindHeader() {
+    $$('.view-tab').forEach(function (tab) {
+      tab.addEventListener('click', function () { setView(tab.dataset.view); });
+    });
+
+    var themeBtn = document.getElementById('theme-btn');
+    var themeMenu = document.getElementById('theme-menu');
+    themeBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var open = themeBtn.getAttribute('aria-expanded') === 'true';
+      if (open) {
+        themeMenu.setAttribute('hidden', '');
+        themeBtn.setAttribute('aria-expanded', 'false');
+      } else {
+        closeLangMenu();
+        themeMenu.removeAttribute('hidden');
+        themeBtn.setAttribute('aria-expanded', 'true');
+      }
+    });
+    themeMenu.querySelectorAll('.menu-option').forEach(function (opt) {
+      opt.addEventListener('click', function (e) {
+        e.stopPropagation();
+        setTheme(opt.dataset.themeValue);
+        themeMenu.setAttribute('hidden', '');
+        themeBtn.setAttribute('aria-expanded', 'false');
+      });
+    });
+
+    try {
+      var mq = matchMedia('(prefers-color-scheme: dark)');
+      onMedia(mq, function () {
+        if (getTheme() === 'system') applyTheme('system');
+      });
+    } catch (e) {}
+
+    $$('.settings-tab').forEach(function (tab) {
+      tab.addEventListener('click', function () { renderSettingsSection(tab.dataset.section); });
+    });
+
+    var header = document.getElementById('app-header');
+    var onScroll = function () {
+      if (window.scrollY > 8) header.classList.add('is-scrolled');
+      else header.classList.remove('is-scrolled');
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  }
+
+  /* ============================================================
+     OFFLINE / ONLINE
+     ============================================================ */
+  function showOfflineBanner() {
+    if (document.getElementById('offline-banner')) return;
+    var el = document.createElement('div');
+    el.id = 'offline-banner';
+    el.className = 'offline-banner';
+    el.setAttribute('role', 'alert');
+    el.innerHTML = '<i data-lucide="wifi-off"></i><span>' + esc(t('offline')) + '</span>';
+    document.body.appendChild(el);
+    icons();
+  }
+  function hideOfflineBanner() {
+    var el = document.getElementById('offline-banner');
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  }
+
+  function bindNetwork() {
+    window.addEventListener('offline', function () {
+      showOfflineBanner();
+    });
+    window.addEventListener('online', function () {
+      hideOfflineBanner();
+      toast('info', t('online'), '');
+    });
+    if (!navigator.onLine) showOfflineBanner();
+  }
+
+  /* ============================================================
+     VISIBILITY — pause animasi saat tab hidden
+     ============================================================ */
+  function bindVisibility() {
+    document.addEventListener('visibilitychange', function () {
+      document.documentElement.classList.toggle('page-hidden', document.hidden);
+    });
+  }
+
+  /* ============================================================
+     INIT
+     ============================================================ */
+  function init() {
+    state.lang = ls.get('nova.lang', 'id');
+    if (!I18N[state.lang]) state.lang = 'id';
+
+    applyTheme(getTheme());
+    setAccent(getAccent());
+    setDensity(getDensity());
+    setMotion(getMotion());
+    setAmbient(getAmbient());
+    setBgEffects(getBgEffects());
+
+    bindHeader();
+    bindNetwork();
+    bindVisibility();
+    translateStatic();
+
+    // Prefill email terakhir
+    try {
+      var last = ls.get('nova.lastEmail', '');
+      if (last && EMAIL_RE.test(last)) state.email = last;
+    } catch (e) {}
+
+    // Pulihkan cooldown resend dari localStorage (persist antar reload)
+    var storedEnds = parseInt(ls.get('nova.resendEndsAt', '0'), 10) || 0;
+    if (storedEnds > Date.now()) {
+      state.resendEndsAt = storedEnds;
+    } else if (storedEnds > 0) {
+      ls.del('nova.resendEndsAt');
+    }
+
+    setOrbState('idle');
+    renderStepper();
+    renderCard();
+
+    icons();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>

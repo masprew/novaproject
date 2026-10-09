@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<meta name="color-scheme" content="dark light" />
+<meta name="theme-color" content="#080C16" />
+<title>Verifikasi Akses — Nova</title>
+
+<script>
+  (function () {
+    var root = document.documentElement;
+    try {
+      var t = localStorage.getItem('nova.theme') || 'dark';
+      var a = localStorage.getItem('nova.accent') || 'purple-teal';
+      var dark = true;
+      try { dark = matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) {}
+      var resolved = t === 'system' ? (dark ? 'dark' : 'light') : t;
+      root.setAttribute('data-theme', resolved);
+      root.setAttribute('data-accent', a);
+    } catch (e) {
+      root.setAttribute('data-theme', 'dark');
+      root.setAttribute('data-accent', 'purple-teal');
+    }
+  })();
+</script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+
+<style>
+:root {
+  --bg-0: #080C16;
+  --surface:    rgba(255,255,255,0.025);
+  --surface-2:  rgba(255,255,255,0.045);
+  --surface-3:  rgba(255,255,255,0.07);
+  --surface-solid: #0F1424;
+  --border:   rgba(255,255,255,0.06);
+  --border-2: rgba(255,255,255,0.10);
+  --border-3: rgba(255,255,255,0.16);
+  --text:   #FFFFFF;
+  --text-2: #A0A8BC;
+  --text-3: #6B7280;
+  --success: #34D399;
+  --danger:  #F87171;
+  --warning: #FBBF24;
+  --info:    #60A5FA;
+  --acc-1: #8B5CF6;
+  --acc-1-soft: #A78BFA;
+  --acc-2: #10B981;
+  --acc-2-soft: #34D399;
+  --acc-1-rgb: 139,92,246;
+  --acc-2-rgb: 16,185,129;
+  --grad-cta:     linear-gradient(135deg, var(--acc-1), var(--acc-2));
+  --grad-premium: linear-gradient(135deg, var(--acc-1-soft), var(--acc-1));
+  --shadow-lg: 0 24px 48px -16px rgba(0,0,0,0.7);
+  --r-sm: 10px; --r: 14px; --r-md: 16px; --r-xl: 24px;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+[data-accent="purple-teal"]   { --acc-1:#8B5CF6; --acc-1-soft:#A78BFA; --acc-2:#10B981; --acc-2-soft:#34D399; --acc-1-rgb:139,92,246; --acc-2-rgb:16,185,129; }
+[data-accent="blue-purple"]   { --acc-1:#60A5FA; --acc-1-soft:#93C5FD; --acc-2:#8B5CF6; --acc-2-soft:#A78BFA; --acc-1-rgb:96,165,250; --acc-2-rgb:139,92,246; }
+[data-accent="pink-purple"]   { --acc-1:#EC4899; --acc-1-soft:#F472B6; --acc-2:#8B5CF6; --acc-2-soft:#A78BFA; --acc-1-rgb:236,72,153; --acc-2-rgb:139,92,246; }
+[data-accent="orange-yellow"] { --acc-1:#FBBF24; --acc-1-soft:#FCD34D; --acc-2:#F97316; --acc-2-soft:#FB923C; --acc-1-rgb:251,191,36; --acc-2-rgb:249,115,22; }
+[data-theme="light"] {
+  --bg-0: #EEF0F7;
+  --surface:    rgba(255,255,255,0.9);
+  --surface-2:  rgba(15,20,40,0.035);
+  --surface-3:  rgba(15,20,40,0.07);
+  --surface-solid: #FFFFFF;
+  --border:   rgba(15,20,40,0.07);
+  --border-2: rgba(15,20,40,0.13);
+  --border-3: rgba(15,20,40,0.22);
+  --text:   #0A0E1A;
+  --text-2: #4B5268;
+  --text-3: #8A90A4;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+* { -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; min-height: 100vh; width: 100%; }
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
+  background: var(--bg-0);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(24px + var(--safe-top)) 16px calc(24px + var(--safe-bottom));
+  transition: background-color 300ms var(--ease), color 300ms var(--ease);
+}
+::selection { background: rgba(var(--acc-1-rgb), 0.55); color: #fff; }
+button { font: inherit; cursor: pointer; border: 0; background: none; color: inherit; padding: 0; }
+input { font: inherit; }
+svg { display: block; }
+[hidden] { display: none !important; }
+:focus-visible { outline: 2px solid var(--acc-1-soft); outline-offset: 2px; border-radius: 6px; }
+
+.atmosphere { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.atmo-blob { position: absolute; border-radius: 50%; filter: blur(100px); transition: background 400ms var(--ease); }
+.atmo-blob-1 {
+  width: 480px; height: 480px; top: -200px; right: -160px;
+  background: radial-gradient(circle, rgba(var(--acc-1-rgb), 0.55), transparent 65%);
+  opacity: 0.14;
+  animation: drift-1 28s ease-in-out infinite;
+}
+.atmo-blob-2 {
+  width: 420px; height: 420px; bottom: -200px; left: -160px;
+  background: radial-gradient(circle, rgba(var(--acc-2-rgb), 0.55), transparent 65%);
+  opacity: 0.12;
+  animation: drift-2 30s ease-in-out infinite;
+}
+@keyframes drift-1 { 0%,100%{transform:translate(0,0) scale(1)} 50%{transform:translate(-30px,40px) scale(1.06)} }
+@keyframes drift-2 { 0%,100%{transform:translate(0,0) scale(1)} 50%{transform:translate(30px,-30px) scale(1.05)} }
+@media (max-width: 640px) { .atmo-blob { filter: blur(70px); } }
+
+.gate-stage { position: relative; z-index: 10; width: 100%; max-width: 420px; }
+.gate-card {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  padding: 28px 24px;
+  box-shadow: var(--shadow-lg);
+  animation: card-in 400ms var(--ease-out) both;
+}
+@keyframes card-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+.gate-card::before {
+  content: ''; position: absolute; top: 0; left: 15%; right: 15%; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(var(--acc-1-rgb), 0.55), transparent);
+  pointer-events: none;
+}
+.gate-screen { animation: screen-in 320ms var(--ease-out) both; }
+@keyframes screen-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+.gate-brand { display: inline-flex; align-items: center; gap: 10px; margin-bottom: 22px; font-size: 15px; font-weight: 700; letter-spacing: -0.02em; }
+.gate-brand-mark {
+  position: relative;
+  width: 32px; height: 32px;
+  display: grid; place-items: center;
+  border-radius: 9px;
+  background: var(--grad-premium);
+  color: #fff;
+  box-shadow: 0 4px 14px -4px rgba(var(--acc-1-rgb), 0.6);
+}
+.gate-brand-mark::after {
+  content: ''; position: absolute; inset: 0; border-radius: 9px;
+  background: linear-gradient(135deg, rgba(255,255,255,0.4), transparent 55%);
+  pointer-events: none;
+}
+.gate-brand-mark svg { width: 16px; height: 16px; position: relative; z-index: 1; color: #fff; }
+
+.gate-title { font-size: 21px; font-weight: 700; letter-spacing: -0.025em; margin: 0 0 6px; line-height: 1.25; }
+.gate-desc { font-size: 13.5px; line-height: 1.55; color: var(--text-2); margin: 0 0 22px; }
+.gate-field { margin-bottom: 18px; }
+.gate-label {
+  display: block; font-size: 11px; font-weight: 600; color: var(--text-2);
+  letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 8px;
+}
+.gate-input-wrap { position: relative; }
+.gate-input-icon {
+  position: absolute; left: 15px; top: 50%;
+  transform: translateY(-50%);
+  width: 17px; height: 17px;
+  color: var(--text-3);
+  pointer-events: none;
+  transition: color 200ms var(--ease), transform 200ms var(--ease);
+}
+.gate-input-wrap:focus-within .gate-input-icon { color: var(--acc-1-soft); transform: translateY(-50%) scale(1.06); }
+
+.gate-input {
+  width: 100%; height: 52px;
+  padding: 0 14px 0 44px;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  color: var(--text);
+  font-size: 15px;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+  transition: border-color 200ms var(--ease), box-shadow 200ms var(--ease), background-color 200ms var(--ease);
+}
+.gate-input::placeholder { color: var(--text-3); }
+.gate-input:focus {
+  border-color: rgba(var(--acc-1-rgb), 0.6);
+  background: var(--surface-3);
+  box-shadow: 0 0 0 4px rgba(var(--acc-1-rgb), 0.12);
+}
+.gate-input[aria-invalid="true"] { border-color: rgba(248,113,113,0.55); }
+.gate-input[aria-invalid="true"]:focus { box-shadow: 0 0 0 4px rgba(248,113,113,0.14); }
+.gate-input:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.gate-error {
+  display: flex; align-items: flex-start; gap: 7px;
+  font-size: 12.5px; line-height: 1.5;
+  color: var(--danger);
+  margin-top: 9px;
+  animation: err-in 220ms var(--ease-out) both;
+}
+.gate-error::before {
+  content: ''; width: 13px; height: 13px; flex-shrink: 0; margin-top: 2px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F87171' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='10'/><line x1='12' y1='8' x2='12' y2='12'/><line x1='12' y1='16' x2='12.01' y2='16'/></svg>");
+  background-size: contain; background-repeat: no-repeat;
+}
+@keyframes err-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
+
+.gate-btn {
+  position: relative;
+  display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+  width: 100%; height: 52px;
+  padding: 0 20px;
+  border-radius: var(--r-md);
+  font-size: 15px; font-weight: 600; letter-spacing: -0.01em;
+  color: #fff;
+  background: var(--grad-cta);
+  cursor: pointer;
+  overflow: hidden;
+  isolation: isolate;
+  box-shadow: 0 8px 22px -10px rgba(var(--acc-1-rgb), 0.65);
+  transition: transform 180ms var(--ease), box-shadow 300ms var(--ease), filter 200ms var(--ease);
+}
+.gate-btn::before {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.18), transparent 55%);
+  z-index: 0; pointer-events: none;
+}
+.gate-btn > * { position: relative; z-index: 1; }
+.gate-btn svg { width: 16px; height: 16px; }
+.gate-btn:active:not(:disabled) { transform: scale(0.97); }
+.gate-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px -12px rgba(var(--acc-1-rgb), 0.75);
+  filter: brightness(1.05);
+}
+.gate-btn:disabled { cursor: not-allowed; opacity: 0.55; }
+
+.spinner {
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.gate-back {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 16px; padding: 10px 4px; min-height: 40px;
+  font-size: 13px; font-weight: 500;
+  color: var(--text-2);
+  background: transparent;
+  cursor: pointer;
+  transition: color 180ms var(--ease);
+}
+.gate-back:hover { color: var(--text); }
+.gate-back svg { width: 14px; height: 14px; }
+
+.gate-loading { text-align: center; padding: 12px 0; }
+.gate-spinner {
+  width: 44px; height: 44px; margin: 0 auto 18px;
+  border-radius: 50%;
+  border: 3px solid var(--surface-3);
+  border-top-color: var(--acc-1);
+  animation: spin 0.8s linear infinite;
+}
+
+.gate-success-mark {
+  width: 64px; height: 64px; margin: 0 auto 18px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  background: linear-gradient(135deg, #34D399, #10B981);
+  color: #fff;
+  box-shadow: 0 16px 36px -12px rgba(16,185,129,0.6), 0 0 0 8px rgba(52,211,153,0.08);
+  animation: pop-in 600ms var(--ease-out) both;
+}
+.gate-success-mark svg { width: 30px; height: 30px; stroke-width: 2.6; }
+@keyframes pop-in {
+  0% { transform: scale(0.35); opacity: 0; }
+  55% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+.gate-user-info {
+  margin-top: 20px; padding: 14px 16px;
+  border-radius: var(--r);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  text-align: left;
+}
+.gate-user-row {
+  display: flex; justify-content: space-between; gap: 12px;
+  padding: 8px 0; font-size: 13px;
+}
+.gate-user-row + .gate-user-row { border-top: 1px solid var(--border); }
+.gate-user-row .k { color: var(--text-2); flex-shrink: 0; }
+.gate-user-row .v {
+  font-weight: 600; color: var(--text); text-align: right;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+</style>
+</head>
+
+<body>
+
+<div class="atmosphere" aria-hidden="true">
+  <span class="atmo-blob atmo-blob-1"></span>
+  <span class="atmo-blob atmo-blob-2"></span>
+</div>
+
+<div class="gate-stage">
+  <div class="gate-card" id="gate-card">
+
+    <!-- SCREEN 1: TOKEN -->
+    <div class="gate-screen" id="screen-token">
+      <div class="gate-brand">
+        <span class="gate-brand-mark"><i data-lucide="zap"></i></span>
+        <span>Nova</span>
+      </div>
+      <h1 class="gate-title">Masukkan Token</h1>
+      <p class="gate-desc">Token akses wajib diisi untuk melanjutkan.</p>
+      <form id="form-token" novalidate>
+        <div class="gate-field">
+          <label for="input-token" class="gate-label">Access Token</label>
+          <div class="gate-input-wrap">
+            <i data-lucide="key-round" class="gate-input-icon"></i>
+            <input id="input-token" type="text" class="gate-input" placeholder="decatech_xxxxx" autocomplete="off" spellcheck="false" autocapitalize="off" />
+          </div>
+          <p id="error-token" class="gate-error" hidden></p>
+        </div>
+        <button type="submit" class="gate-btn" id="btn-token">
+          <span>Lanjut</span>
+          <i data-lucide="arrow-right"></i>
+        </button>
+      </form>
+    </div>
+
+    <!-- SCREEN 2: PHONE -->
+    <div class="gate-screen" id="screen-phone" hidden>
+      <div class="gate-brand">
+        <span class="gate-brand-mark"><i data-lucide="shield-check"></i></span>
+        <span>Verifikasi Nomor</span>
+      </div>
+      <h1 class="gate-title">Masukkan Nomor HP</h1>
+      <p class="gate-desc">Nomor harus terdaftar untuk dapat mengakses aplikasi.</p>
+      <form id="form-phone" novalidate>
+        <div class="gate-field">
+          <label for="input-phone" class="gate-label">Nomor Telepon</label>
+          <div class="gate-input-wrap">
+            <i data-lucide="phone" class="gate-input-icon"></i>
+            <input id="input-phone" type="tel" class="gate-input" placeholder="0812 3456 7890" autocomplete="tel" inputmode="numeric" />
+          </div>
+          <p id="error-phone" class="gate-error" hidden></p>
+        </div>
+        <button type="submit" class="gate-btn" id="btn-phone">
+          <span>Verifikasi</span>
+          <i data-lucide="arrow-right"></i>
+        </button>
+      </form>
+      <button type="button" class="gate-back" id="btn-back">
+        <i data-lucide="arrow-left"></i>
+        <span>Ganti token</span>
+      </button>
+    </div>
+
+    <!-- SCREEN 3: LOADING -->
+    <div class="gate-screen" id="screen-loading" hidden>
+      <div class="gate-loading">
+        <div class="gate-spinner"></div>
+        <p class="gate-desc" style="text-align:center;margin:0" id="loading-text">Memeriksa nomor…</p>
+      </div>
+    </div>
+
+    <!-- SCREEN 4: SUCCESS -->
+    <div class="gate-screen" id="screen-success" hidden>
+      <div style="text-align:center">
+        <div class="gate-success-mark"><i data-lucide="check"></i></div>
+        <h1 class="gate-title">Selamat Datang</h1>
+        <p class="gate-desc" style="margin-bottom:0">Nomor Anda terverifikasi.</p>
+      </div>
+      <div class="gate-user-info" id="user-info"></div>
+    </div>
+
+  </div>
+</div>
+
+<script type="module">
+import { supabase } from './supabase.js';
+
+(function () {
+  'use strict';
+
+  /* ============================================================
+     CONFIG
+     ============================================================ */
+  var CONFIG = {
+    SESSION_TTL: 30 * 24 * 60 * 60 * 1000,
+    MIN_PHONE_DIGITS: 11,
+    NEXT_PAGE: 'index.html',
+  };
+
+  function $(s) { return document.querySelector(s); }
+  function icons() { if (window.lucide && window.lucide.createIcons) window.lucide.createIcons(); }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c];
+    });
+  }
+
+  var hasLS = (function () {
+    try { localStorage.setItem('__t','1'); localStorage.removeItem('__t'); return true; }
+    catch (e) { return false; }
+  })();
+  function lsGet(k, d) { try { return hasLS ? (localStorage.getItem(k) || d) : d; } catch (e) { return d; } }
+  function lsSet(k, v) { try { if (hasLS) localStorage.setItem(k, String(v)); } catch (e) {} }
+
+  function normalizePhone(raw) {
+    var p = String(raw || '').replace(/\D/g, '');
+    if (!p) return '';
+    if (p.charAt(0) === '0') p = '62' + p.slice(1);
+    else if (p.charAt(0) === '8') p = '62' + p;
+    else if (p.indexOf('62') !== 0) p = '62' + p;
+    return p;
+  }
+  function formatPhoneDisplay(p) {
+    var local = p.indexOf('62') === 0 ? '0' + p.slice(2) : p;
+    if (local.length < 8) return local;
+    return local.replace(/(\d{4})(\d{4})(\d+)/, '$1-$2-$3');
+  }
+
+  var state = { busy: false, phone: '', user: null, config: null };
+
+  function showScreen(name) {
+    ['token', 'phone', 'loading', 'success'].forEach(function (n) {
+      var el = document.getElementById('screen-' + n);
+      if (el) el.hidden = (n !== name);
+    });
+    icons();
+    if (name === 'token') setTimeout(function () { var i = $('#input-token'); if (i) i.focus(); }, 80);
+    if (name === 'phone') setTimeout(function () { var i = $('#input-phone'); if (i) i.focus(); }, 80);
+  }
+
+  function showError(id, msg) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = msg;
+    el.hidden = !msg;
+  }
+
+  function isSessionValid() {
+    var okAt = parseInt(lsGet('nova.access.okAt', '0'), 10) || 0;
+    return okAt > 0 && (Date.now() - okAt) < CONFIG.SESSION_TTL;
+  }
+
+  function saveSession(user, sessionVersion) {
+    lsSet('nova.access.okAt', String(Date.now()));
+    lsSet('nova.user.phone', user.phone || '');
+    lsSet('nova.user.name', user.name || '');
+    lsSet('nova.user.plan', user.plan || '');
+    lsSet('nova.user.expires', user.expires || '');
+    if (sessionVersion != null) {
+      lsSet('nova.access.sessionVersion', String(sessionVersion));
+    }
+  }
+
+  /* ===== Load config dari Supabase ===== */
+  async function loadConfig() {
+    try {
+      var res = await supabase.from('app_config').select('key, value');
+      if (res.error) throw res.error;
+      var cfg = {};
+      (res.data || []).forEach(function (row) { cfg[row.key] = row.value; });
+      return cfg;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /* ===== STEP 1: TOKEN ===== */
+  async function handleTokenSubmit(e) {
+    e.preventDefault();
+    if (state.busy) return;
+
+    var input = $('#input-token');
+    var btn = $('#btn-token');
+    var value = input.value.trim();
+
+    showError('error-token', '');
+    input.setAttribute('aria-invalid', 'false');
+
+    if (!value) {
+      showError('error-token', 'Token wajib diisi.');
+      input.setAttribute('aria-invalid', 'true');
+      input.focus();
+      return;
+    }
+
+    state.busy = true;
+    if (btn) btn.disabled = true;
+    if (btn) btn.innerHTML = '<span class="spinner"></span><span>Memeriksa…</span>';
+
+    state.config = await loadConfig();
+    var expectedToken = (state.config && state.config.token) || '';
+
+    if (!expectedToken || value !== expectedToken) {
+      showError('error-token', 'Token tidak valid. Periksa kembali.');
+      input.setAttribute('aria-invalid', 'true');
+      input.select();
+      state.busy = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<span>Lanjut</span><i data-lucide="arrow-right"></i>';
+        icons();
+      }
+      return;
+    }
+
+    if (state.config && state.config.sessionVersion) {
+      lsSet('nova.access.sessionVersion', String(state.config.sessionVersion));
+    }
+
+    setTimeout(function () {
+      state.busy = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<span>Lanjut</span><i data-lucide="arrow-right"></i>';
+        icons();
+      }
+      input.value = '';
+      showScreen('phone');
+    }, 280);
+  }
+
+  /* ===== STEP 2: PHONE ===== */
+  async function handlePhoneSubmit(e) {
+    e.preventDefault();
+    if (state.busy) return;
+
+    var input = $('#input-phone');
+    var btn = $('#btn-phone');
+    var raw = input.value.trim();
+
+    showError('error-phone', '');
+    input.setAttribute('aria-invalid', 'false');
+
+    if (!raw) {
+      showError('error-phone', 'Nomor wajib diisi.');
+      input.setAttribute('aria-invalid', 'true');
+      input.focus();
+      return;
+    }
+
+    var phone = normalizePhone(raw);
+    if (phone.length < CONFIG.MIN_PHONE_DIGITS) {
+      showError('error-phone', 'Nomor terlalu pendek. Contoh: 0812 3456 7890');
+      input.setAttribute('aria-invalid', 'true');
+      input.focus();
+      return;
+    }
+
+    state.busy = true;
+    state.phone = phone;
+    if (btn) btn.disabled = true;
+    input.disabled = true;
+
+    var loadingText = $('#loading-text');
+    if (loadingText) loadingText.textContent = 'Memeriksa nomor…';
+    showScreen('loading');
+
+    try {
+      var res = await supabase
+        .from('users')
+        .select('phone, name, plan, expires, banned')
+        .eq('phone', phone)
+        .maybeSingle();
+
+      if (res.error) throw res.error;
+
+      var entry = res.data;
+
+      if (!entry) {
+        throw new Error('Nomor tidak terdaftar. Hubungi admin untuk mendaftarkan nomor Anda.');
+      }
+
+      if (entry.banned === true) {
+        throw new Error('Akun Anda diblokir oleh admin.');
+      }
+
+      if (entry.expires) {
+        var exp = new Date(entry.expires).getTime();
+        if (!isNaN(exp) && exp < Date.now()) {
+          throw new Error('Masa aktif akun Anda sudah habis. Hubungi admin untuk perpanjangan.');
+        }
+      }
+
+      state.user = {
+        phone: entry.phone,
+        name: entry.name || '(tanpa nama)',
+        plan: entry.plan || 'basic',
+        expires: entry.expires || null,
+      };
+      var sessionVer = state.config ? state.config.sessionVersion : null;
+      saveSession(state.user, sessionVer);
+
+      // Log aktivitas login ke Supabase (fire and forget)
+      try {
+        supabase.from('activity_log').insert({
+          type: 'login',
+          phone: state.user.phone,
+          name: state.user.name,
+          status: 'success',
+        }).then(function () {}).catch(function () {});
+      } catch (e) {}
+
+      var infoEl = $('#user-info');
+      if (infoEl) {
+        var rows = '';
+        rows += '<div class="gate-user-row"><span class="k">Nama</span><span class="v">' + esc(state.user.name) + '</span></div>';
+        rows += '<div class="gate-user-row"><span class="k">Nomor</span><span class="v">' + esc(formatPhoneDisplay(state.user.phone)) + '</span></div>';
+        rows += '<div class="gate-user-row"><span class="k">Paket</span><span class="v">' + esc(state.user.plan.toUpperCase()) + '</span></div>';
+        if (state.user.expires) {
+          var d = new Date(state.user.expires);
+          var fmt = d.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+          rows += '<div class="gate-user-row"><span class="k">Berlaku sampai</span><span class="v">' + esc(fmt) + '</span></div>';
+        }
+        infoEl.innerHTML = rows;
+      }
+
+      showScreen('success');
+
+      setTimeout(function () {
+        window.location.replace(CONFIG.NEXT_PAGE);
+      }, 1500);
+
+    } catch (err) {
+      input.disabled = false;
+      input.setAttribute('aria-invalid', 'true');
+      if (btn) btn.disabled = false;
+      state.busy = false;
+      showScreen('phone');
+      showError('error-phone', err.message || 'Gagal memeriksa nomor. Coba lagi.');
+    }
+  }
+
+  /* ===== INIT ===== */
+  function init() {
+    icons();
+
+    // Tampilkan alasan logout kalau ada
+    try {
+      var reason = sessionStorage.getItem('nova.logoutReason');
+      if (reason) {
+        sessionStorage.removeItem('nova.logoutReason');
+        setTimeout(function () { showError('error-token', reason); }, 300);
+      }
+    } catch (e) {}
+
+    if (isSessionValid()) {
+      window.location.replace(CONFIG.NEXT_PAGE);
+      return;
+    }
+
+    var formToken = $('#form-token');
+    var formPhone = $('#form-phone');
+    var btnBack = $('#btn-back');
+
+    if (formToken) formToken.addEventListener('submit', handleTokenSubmit);
+    if (formPhone) formPhone.addEventListener('submit', handlePhoneSubmit);
+
+    if (btnBack) {
+      btnBack.addEventListener('click', function () {
+        showError('error-phone', '');
+        var pInput = $('#input-phone');
+        if (pInput) {
+          pInput.value = '';
+          pInput.disabled = false;
+          pInput.removeAttribute('aria-invalid');
+        }
+        showScreen('token');
+      });
+    }
+
+    showScreen('token');
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>
