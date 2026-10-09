@@ -233,20 +233,20 @@ app.post('/api/apply-premium', strictLimiter, async (req, res) => {
  * Vercel — Vercel sendiri yang serve /public dan panggil app.
  * Di lokal: blok ini yang bikin server jalan.
  * ============================================================ */
-if (process.env.VERCEL !== '1') {
-  app.use(express.static(path.resolve(__dirname, 'public'), {
-    maxAge: '1h',
-    setHeaders(res, filePath) {
-      if (filePath.endsWith('.html')) {
-        res.setHeader('Cache-Control', 'no-cache');
-      }
-    },
-  }));
+app.use(express.static(path.resolve(__dirname, 'public'), {
+  maxAge: '1h',
+  setHeaders(res, filePath) {
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+  },
+}));
 
-  app.get('*', (req, res) => {
-    res.sendFile(path.resolve(__dirname, 'public/index.html'));
-  });
+app.get('*', (req, res) => {
+  res.sendFile(path.resolve(__dirname, 'public/index.html'));
+});
 
+if (!process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`Nova listening on :${PORT}`);
   });
