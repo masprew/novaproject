@@ -239,7 +239,6 @@ app.post('/api/apply-premium', strictLimiter, async (req, res) => {
  * folder /public dari CDN. Blok ini tetap dipertahankan untuk
  * development lokal (node server.js).
  * ============================================================ */
-if (process.env.VERCEL !== '1') {
   const { default: path } = await import('node:path');
   const { fileURLToPath } = await import('node:url');
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
