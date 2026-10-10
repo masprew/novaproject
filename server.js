@@ -5,12 +5,12 @@
 import 'dotenv/config';
 import express from 'express';
 import helmet from 'helmet';
-import cookieSession from 'cookie-session';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+const SUPABASE_URL = 'https://sdjgbrkjhguoiwouwcti.supabase.co';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3000;
